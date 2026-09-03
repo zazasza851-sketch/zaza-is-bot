@@ -1,0 +1,15 @@
+{
+  "name": "zazaszabot",
+  "version": "1.0.0",
+  "description": "WhatsApp Bot ZazaBot",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "@whiskeysockets/baileys": "latest",
+    "pino": "latest",
+    "qrcode-terminal": "latest"
+  }
+}
