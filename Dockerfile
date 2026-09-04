@@ -2,7 +2,7 @@ FROM node:22
 
 WORKDIR /app
 
-RUN npm install @whiskeysockets/baileys pino qrcode-terminal
+RUN npm install @whiskeysockets/baileys pino qrcode
 
 COPY index.js ./
 
