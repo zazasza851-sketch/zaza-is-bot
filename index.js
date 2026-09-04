@@ -765,7 +765,7 @@ async function requireAdmin(jid, sender) {
   }
 
   return true;
-        }
+    }
 /* =========================================================
    MESSAGE HELPERS
 ========================================================= */
@@ -990,232 +990,7 @@ function getBotName() {
     sock?.user?.name ||
     BOT_NAME
   );
-      }
-/* =========================================================
-   MESSAGE HELPERS
-========================================================= */
-
-async function sendMessage(jid, text, options = {}) {
-  if (!sock || !jid) return;
-
-  try {
-    return await sock.sendMessage(
-      jid,
-      {
-        text: String(text),
-        ...options
-      }
-    );
-  } catch (error) {
-    console.log(
-      "Gagal mengirim pesan:",
-      error.message
-    );
-  }
 }
-
-function getSender(msg) {
-  return (
-    msg?.key?.participant ||
-    msg?.participant ||
-    msg?.key?.remoteJid ||
-    ""
-  );
-}
-
-function getChatId(msg) {
-  return msg?.key?.remoteJid || "";
-}
-
-function getMessageText(msg) {
-  const m = msg?.message;
-
-  if (!m) return "";
-
-  return (
-    m.conversation ||
-    m.extendedTextMessage?.text ||
-    m.imageMessage?.caption ||
-    m.videoMessage?.caption ||
-    m.documentMessage?.caption ||
-    m.buttonsResponseMessage?.selectedButtonId ||
-    m.listResponseMessage?.singleSelectReply?.selectedRowId ||
-    ""
-  );
-}
-
-function getQuotedMessage(msg) {
-  return (
-    msg?.message?.extendedTextMessage
-      ?.contextInfo?.quotedMessage || null
-  );
-}
-
-function getQuotedParticipant(msg) {
-  return (
-    msg?.message?.extendedTextMessage
-      ?.contextInfo?.participant || ""
-  );
-}
-
-function getMentions(msg) {
-  return (
-    msg?.message?.extendedTextMessage
-      ?.contextInfo?.mentionedJid || []
-  );
-}
-
-async function downloadMedia(message, type) {
-  const stream =
-    await downloadContentFromMessage(
-      message,
-      type
-    );
-
-  const chunks = [];
-
-  for await (const chunk of stream) {
-    chunks.push(chunk);
-  }
-
-  return Buffer.concat(chunks);
-}
-
-
-/* =========================================================
-   GROUP SETTINGS
-========================================================= */
-
-function ensureGroup(jid) {
-  if (!db.groups[jid]) {
-    db.groups[jid] = {
-      welcome: false,
-      left: false,
-      antiLink: false,
-      antiBadword: false,
-      warn: {},
-      blacklist: [],
-      messageCount: 0,
-      points: {},
-      list: {},
-      reminders: {},
-      alarms: {}
-    };
-
-    saveDatabase();
-  }
-
-  return db.groups[jid];
-}
-
-
-/* =========================================================
-   COMMAND PARSER
-========================================================= */
-
-function parseCommand(text) {
-  if (!text) return null;
-
-  if (!text.startsWith(PREFIX)) {
-    return null;
-  }
-
-  const body =
-    text.slice(PREFIX.length).trim();
-
-  if (!body) return null;
-
-  const parts =
-    body.split(/\s+/);
-
-  const command =
-    parts.shift()
-      .toLowerCase();
-
-  const args = parts;
-
-  return {
-    command,
-    args,
-    text: args.join(" ")
-  };
-}
-
-
-/* =========================================================
-   RUNTIME
-========================================================= */
-
-const START_TIME = Date.now();
-
-function runtime() {
-  const seconds =
-    Math.floor(
-      (Date.now() - START_TIME) / 1000
-    );
-
-  const days =
-    Math.floor(seconds / 86400);
-
-  const hours =
-    Math.floor(
-      (seconds % 86400) / 3600
-    );
-
-  const minutes =
-    Math.floor(
-      (seconds % 3600) / 60
-    );
-
-  const secs =
-    seconds % 60;
-
-  return `${days}d ${hours}h ${minutes}m ${secs}s`;
-}
-
-
-/* =========================================================
-   RANDOM HELPERS
-========================================================= */
-
-function randomItem(array) {
-  return array[
-    Math.floor(
-      Math.random() * array.length
-    )
-  ];
-}
-
-function randomNumber(min = 1, max = 100) {
-  return Math.floor(
-    Math.random() *
-      (max - min + 1)
-  ) + min;
-}
-
-function cleanText(text = "") {
-  return String(text)
-    .replace(/[<>]/g, "")
-    .trim();
-}
-
-
-/* =========================================================
-   BOT INFORMATION
-========================================================= */
-
-function getBotNumber() {
-  return normalizeJid(
-    sock?.user?.id || ""
-  );
-}
-
-function getBotName() {
-  return (
-    sock?.user?.name ||
-    BOT_NAME
-  );
-                           }
 /* =========================================================
    MENU
 ========================================================= */
@@ -1390,7 +1165,7 @@ async function checkOwnerCommand(command, jid) {
   }
 
   return true;
-                               }
+}
 /* =========================================================
    SENDER HELPER
 ========================================================= */
@@ -1766,7 +1541,8 @@ ke sistem pembayaran Zaza Store.`
     default:
       return false;
   }
-            }
+  }
+
 /* =========================================================
    OWNER COMMANDS
 ========================================================= */
@@ -2089,9 +1865,7 @@ ${db.banned.length
         commandHelp(command)
       );
   }
-}
-
-
+          }
 /* =========================================================
    GROUP COMMANDS
 ========================================================= */
@@ -2569,485 +2343,8 @@ async function handleGroupCommand(
         `✅ ${PREFIX}${command} terdeteksi dan siap digunakan.\n\nGunakan ${PREFIX}menu untuk melihat daftar command.`
       );
   }
-  }/* =========================================================
-   GROUP COMMANDS
-========================================================= */
-
-async function handleGroupCommand(
-  command,
-  jid,
-  sender,
-  args,
-  msg
-) {
-  if (!GROUP_COMMANDS.has(command)) {
-    return false;
-  }
-
-  if (!groupOnly(jid)) {
-    await reply(
-      jid,
-      "❌ Perintah ini hanya dapat digunakan di grup."
-    );
-    return true;
-  }
-
-  const adminCommands = [
-    "add",
-    "kick",
-    "promote",
-    "demote",
-    "banmember",
-    "unbanmember",
-    "tagall",
-    "hidetag",
-    "setnamegc",
-    "setdescgc",
-    "setopen",
-    "setclose",
-    "setwarn",
-    "resetwarn",
-    "blacklist",
-    "delblacklist",
-    "resetblacklist",
-    "mute",
-    "pinmsg",
-    "unpinmsg",
-    "setwelcome",
-    "setleft"
-  ];
-
-  if (adminCommands.includes(command)) {
-    const allowed =
-      await requireAdmin(
-        jid,
-        sender
-      );
-
-    if (!allowed) {
-      return true;
     }
-  }
-
-  const group =
-    ensureGroup(jid);
-
-  switch (command) {
-
-    case "groupinfo": {
-      const metadata =
-        await sock.groupMetadata(jid);
-
-      return reply(
-        jid,
-        `👥 GROUP INFO
-
-📛 Nama: ${metadata.subject}
-🆔 ID: ${jid}
-👤 Member: ${metadata.participants.length}
-👑 Admin: ${
-          metadata.participants
-            .filter(p =>
-              participantIsAdmin(p)
-            ).length
-        }`
-      );
-    }
-
-
-    case "groupadmin": {
-      const metadata =
-        await sock.groupMetadata(jid);
-
-      const admins =
-        metadata.participants
-          .filter(p =>
-            participantIsAdmin(p)
-          );
-
-      let text =
-        "👑 ADMIN GRUP\n\n";
-
-      admins.forEach(
-        (p, i) => {
-          text +=
-            `${i + 1}. @${normalizeJid(
-              p.id || p.jid || ""
-            ).split("@")[0]}\n`;
-        }
-      );
-
-      return sock.sendMessage(
-        jid,
-        {
-          text,
-          mentions: admins.map(
-            p =>
-              p.id ||
-              p.jid ||
-              p.participant
-          )
-        }
-      );
-    }
-
-
-    case "tagall":
-    case "hidetag": {
-      const metadata =
-        await sock.groupMetadata(jid);
-
-      const participants =
-        metadata.participants || [];
-
-      const mentions =
-        participants.map(
-          p =>
-            p.id ||
-            p.jid ||
-            p.participant
-        );
-
-      let text =
-        command === "tagall"
-          ? "📢 TAG ALL\n\n"
-          : "📢 HIDETAG\n\n";
-
-      participants.forEach(
-        (p, i) => {
-          const id =
-            p.id ||
-            p.jid ||
-            p.participant ||
-            "";
-
-          text +=
-            `${i + 1}. @${normalizeJid(id)
-              .split("@")[0]}\n`;
-        }
-      );
-
-      return sock.sendMessage(
-        jid,
-        {
-          text,
-          mentions
-        }
-      );
-    }
-
-
-    case "add": {
-      const number =
-        args[0]?.replace(/\D/g, "");
-
-      if (!number) {
-        return reply(
-          jid,
-          `Contoh:\n${PREFIX}add 628xxx`
-        );
-      }
-
-      try {
-        await sock.groupParticipantsUpdate(
-          jid,
-          [`${number}@s.whatsapp.net`],
-          "add"
-        );
-
-        return reply(
-          jid,
-          `✅ Berhasil menambahkan +${number}`
-        );
-      } catch (error) {
-        return reply(
-          jid,
-          `❌ Gagal menambahkan nomor.\n\n${error.message}`
-        );
-      }
-    }
-
-
-    case "kick":
-    case "banmember": {
-      const target =
-        getMentionTarget(
-          msg,
-          args
-        );
-
-      if (!target) {
-        return reply(
-          jid,
-          `Tag member terlebih dahulu.\n\nContoh:\n${PREFIX}${command} @628xxx`
-        );
-      }
-
-      try {
-        await sock.groupParticipantsUpdate(
-          jid,
-          [target],
-          "remove"
-        );
-
-        return reply(
-          jid,
-          `✅ Member berhasil dikeluarkan.`
-        );
-      } catch (error) {
-        return reply(
-          jid,
-          `❌ Gagal mengeluarkan member.\n\n${error.message}`
-        );
-      }
-    }
-
-
-    case "promote": {
-      const target =
-        getMentionTarget(
-          msg,
-          args
-        );
-
-      if (!target) {
-        return reply(
-          jid,
-          `Tag member terlebih dahulu.`
-        );
-      }
-
-      await sock.groupParticipantsUpdate(
-        jid,
-        [target],
-        "promote"
-      );
-
-      return reply(
-        jid,
-        "✅ Member berhasil dijadikan admin."
-      );
-    }
-
-
-    case "demote": {
-      const target =
-        getMentionTarget(
-          msg,
-          args
-        );
-
-      if (!target) {
-        return reply(
-          jid,
-          `Tag admin yang ingin diturunkan.`
-        );
-      }
-
-      await sock.groupParticipantsUpdate(
-        jid,
-        [target],
-        "demote"
-      );
-
-      return reply(
-        jid,
-        "✅ Admin berhasil diturunkan."
-      );
-    }
-
-
-    case "kickme":
-    case "left":
-      try {
-        await sock.groupParticipantsUpdate(
-          jid,
-          [sender],
-          "remove"
-        );
-      } catch (error) {
-        await reply(
-          jid,
-          `❌ Gagal keluar dari grup.\n\n${error.message}`
-        );
-      }
-
-      return true;
-
-
-    case "setnamegc": {
-      const name =
-        cleanText(args.join(" "));
-
-      if (!name) {
-        return reply(
-          jid,
-          `Contoh:\n${PREFIX}setnamegc Nama Grup Baru`
-        );
-      }
-
-      await sock.groupUpdateSubject(
-        jid,
-        name
-      );
-
-      return reply(
-        jid,
-        "✅ Nama grup berhasil diubah."
-      );
-    }
-
-
-    case "setdescgc": {
-      const desc =
-        cleanText(args.join(" "));
-
-      if (!desc) {
-        return reply(
-          jid,
-          `Contoh:\n${PREFIX}setdescgc Deskripsi grup`
-        );
-      }
-
-      await sock.groupUpdateDescription(
-        jid,
-        desc
-      );
-
-      return reply(
-        jid,
-        "✅ Deskripsi grup berhasil diubah."
-      );
-    }
-
-
-    case "setopen":
-      await sock.groupSettingUpdate(
-        jid,
-        "not_announcement"
-      );
-
-      return reply(
-        jid,
-        "🔓 Grup dibuka. Semua member dapat mengirim pesan."
-      );
-
-
-    case "setclose":
-      await sock.groupSettingUpdate(
-        jid,
-        "announcement"
-      );
-
-      return reply(
-        jid,
-        "🔒 Grup ditutup. Hanya admin yang dapat mengirim pesan."
-      );
-
-
-    case "linkgc": {
-      try {
-        const code =
-          await sock.groupInviteCode(jid);
-
-        return reply(
-          jid,
-          `🔗 LINK GRUP\n\nhttps://chat.whatsapp.com/${code}`
-        );
-      } catch (error) {
-        return reply(
-          jid,
-          `❌ Gagal mengambil link grup.\n\n${error.message}`
-        );
-      }
-    }
-
-
-    case "revokelink": {
-      try {
-        await sock.groupRevokeInvite(jid);
-
-        return reply(
-          jid,
-          "✅ Link grup berhasil di-reset."
-        );
-      } catch (error) {
-        return reply(
-          jid,
-          `❌ Gagal reset link.\n\n${error.message}`
-        );
-      }
-    }
-
-
-    case "warn": {
-      const target =
-        getMentionTarget(
-          msg,
-          args
-        ) || sender;
-
-      group.warn[target] =
-        (group.warn[target] || 0) + 1;
-
-      ensureUser(target).warn =
-        group.warn[target];
-
-      saveDatabase();
-
-      return reply(
-        jid,
-        `⚠️ Warning diberikan.\n\nJumlah warn: ${group.warn[target]}`
-      );
-    }
-
-
-    case "cekwarn": {
-      const target =
-        getMentionTarget(
-          msg,
-          args
-        ) || sender;
-
-      const total =
-        group.warn[target] || 0;
-
-      return reply(
-        jid,
-        `⚠️ Warn @${normalizeJid(target)
-          .split("@")[0]}: ${total}`
-      );
-    }
-
-
-    case "resetwarn": {
-      const target =
-        getMentionTarget(
-          msg,
-          args
-        ) || sender;
-
-      group.warn[target] = 0;
-
-      ensureUser(target).warn = 0;
-
-      saveDatabase();
-
-      return reply(
-        jid,
-        "✅ Warn berhasil di-reset."
-      );
-    }
-
-
-    default:
-      return reply(
-        jid,
-        `✅ ${PREFIX}${command} terdeteksi dan siap digunakan.\n\nGunakan ${PREFIX}menu untuk melihat daftar command.`
-      );
-  
-    }
-  /* =========================================================
+/* =========================================================
    STICKER COMMANDS
 ========================================================= */
 
@@ -3269,8 +2566,8 @@ async function handleStickerCommand(
 
 
   return false;
-    }
-  /* =========================================================
+}
+/* =========================================================
    TOOLS COMMANDS
 ========================================================= */
 
@@ -3535,8 +2832,8 @@ yang sedang digunakan.`
     default:
       return false;
   }
-          }
-  /* =========================================================
+    }
+/* =========================================================
    RANDOM & GAME COMMANDS
 ========================================================= */
 
@@ -4011,16 +3308,12 @@ ${text
     default:
       return false;
   }
-}
-  
-  
-  
         }
 /* =========================================================
-   RANDOM & GAME COMMANDS
+   AI / SEARCH / DOWNLOAD
 ========================================================= */
 
-async function handleGameCommand(
+async function handleOnlineCommand(
   command,
   jid,
   args
@@ -4030,461 +3323,281 @@ async function handleGameCommand(
 
   switch (command) {
 
-    case "math": {
-      const a = randomNumber(1, 50);
-      const b = randomNumber(1, 50);
+    case "openai":
+    case "bard":
+    case "nexara":
+    case "aiimage":
+    case "jadianime":
+    case "voicejapan":
+
+      if (!text) {
+        return reply(
+          jid,
+          `🤖 ${command.toUpperCase()}
+
+Masukkan pertanyaan atau teks.
+
+Contoh:
+${PREFIX}${command} halo ZazaBot`
+        );
+      }
 
       return reply(
         jid,
-        `🧮 SOAL MATEMATIKA
+        `🤖 ${command.toUpperCase()}
 
-Berapa hasil:
+Permintaan diterima:
 
-${a} + ${b} = ?
+${text}
 
-Jawab dengan:
-${PREFIX}jawab ${a + b}`
-      );
-    }
-
-
-    case "truth":
-      return reply(
-        jid,
-        `🎯 TRUTH
-
-${randomItem([
-  "Apa hal paling memalukan yang pernah kamu lakukan?",
-  "Siapa orang yang paling sering kamu chat?",
-  "Apa cita-cita terbesar kamu?",
-  "Apa rahasia kecil yang belum banyak orang tahu?",
-  "Apa hal yang paling kamu takutkan?"
-])}`
-      );
-
-
-    case "dare":
-      return reply(
-        jid,
-        `🔥 DARE
-
-${randomItem([
-  "Kirim emoji 😂 sebanyak 10 kali.",
-  "Tag teman yang paling sering membuatmu tertawa.",
-  "Kirim pesan 'Aku keren 😎' di grup.",
-  "Ganti status WhatsApp dengan emoji selama 5 menit.",
-  "Kirim satu pantun spontan."
-])}`
+⚙️ API AI belum dikonfigurasi.
+Setelah API dipasang, command ini
+dapat menghasilkan jawaban otomatis.`
       );
 
 
-    case "asahotak":
-    case "tekateki":
+    case "google":
+      if (!text) {
+        return reply(
+          jid,
+          `Contoh:\n${PREFIX}google cara membuat website`
+        );
+      }
+
       return reply(
         jid,
-        `🧠 TEKA-TEKI
+        `🔎 GOOGLE SEARCH
 
-Aku punya banyak gigi,
-tetapi tidak bisa menggigit.
-
-Apakah aku?
-
-💡 Gunakan ${PREFIX}hint jika menyerah.`
+https://www.google.com/search?q=${encodeURIComponent(text)}`
       );
 
 
-    case "hint":
+    case "googleimage":
+      if (!text) {
+        return reply(
+          jid,
+          `Contoh:\n${PREFIX}googleimage kucing`
+        );
+      }
+
       return reply(
         jid,
-        "💡 HINT: Benda ini sering digunakan untuk merapikan rambut."
+        `🖼️ GOOGLE IMAGE
+
+https://www.google.com/search?tbm=isch&q=${encodeURIComponent(text)}`
       );
 
 
-    case "tebakkata":
+    case "wikipedia":
+      if (!text) {
+        return reply(
+          jid,
+          `Contoh:\n${PREFIX}wikipedia Indonesia`
+        );
+      }
+
       return reply(
         jid,
-        `📝 TEBAK KATA
+        `📚 WIKIPEDIA
 
-Petunjuk:
-Benda yang digunakan untuk menulis.
-
-Jawaban: PENSIL ✏️`
+https://id.wikipedia.org/wiki/${encodeURIComponent(text)}`
       );
 
 
-    case "caklontong":
+    case "ytsearch":
+      if (!text) {
+        return reply(
+          jid,
+          `Contoh:\n${PREFIX}ytsearch lagu Indonesia`
+        );
+      }
+
       return reply(
         jid,
-        `😂 CAK LONTONG
+        `▶️ YOUTUBE SEARCH
 
-Kenapa ayam menyeberang jalan?
-
-Jawaban:
-Karena ayamnya mau ke seberang. 🐔`
+https://www.youtube.com/results?search_query=${encodeURIComponent(text)}`
       );
 
 
-    case "siapakah":
-    case "siapakahaku":
+    case "pinterest":
+      if (!text) {
+        return reply(
+          jid,
+          `Contoh:\n${PREFIX}pinterest anime`
+        );
+      }
+
       return reply(
         jid,
-        `❓ SIAPAKAH AKU?
+        `📌 PINTEREST
 
-Aku adalah sesuatu yang selalu
-mengikuti kamu ketika ada cahaya.
-
-Siapakah aku?
-
-💡 ${PREFIX}hint`
+https://www.pinterest.com/search/pins/?q=${encodeURIComponent(text)}`
       );
 
 
-    case "sambungkata":
+    case "play":
+      if (!text) {
+        return reply(
+          jid,
+          `Contoh:\n${PREFIX}play judul lagu`
+        );
+      }
+
       return reply(
         jid,
-        `🔤 SAMBUNG KATA
+        `🎵 PLAY
 
-Kata pertama:
+Pencarian:
+${text}
 
-ZAZA
-
-Lanjutkan kata berikutnya
-dengan huruf terakhir.`
+⚙️ Downloader audio akan
+disambungkan melalui API.`
       );
 
 
-    case "susunkata":
+    case "lirik":
+      if (!text) {
+        return reply(
+          jid,
+          `Contoh:\n${PREFIX}lirik judul lagu`
+        );
+      }
+
       return reply(
         jid,
-        `🔀 SUSUN KATA
+        `🎵 LIRIK
 
-Susun huruf berikut:
+Judul:
+${text}
 
-T - O - K - O
-
-Jawaban: TOKO 🏪`
+⚙️ API lirik belum dikonfigurasi.`
       );
 
 
-    case "tebakbendera":
+    case "cuaca":
       return reply(
         jid,
-        `🏳️ TEBAK BENDERA
-
-🇮🇩
-
-Negara apakah ini?
-
-Jawaban: Indonesia 🇮🇩`
-      );
-
-
-    case "tebakbom":
-      return reply(
-        jid,
-        `💣 TEBAK BOM
-
-Pilih angka 1 sampai 5.
-
-${PREFIX}pilih 1`
-      );
-
-
-    case "family100":
-      return reply(
-        jid,
-        `👨‍👩‍👧‍👦 FAMILY 100
-
-Sebutkan benda yang biasanya
-ada di kamar tidur.
-
-1. Kasur
-2. Bantal
-3. Lemari
-4. Selimut`
-      );
-
-
-    case "ulartangga":
-      return reply(
-        jid,
-        `🐍 ULAR TANGGA
-
-🎲 Kamu mendapatkan angka:
-${randomNumber(1, 6)}
-
-Game sederhana berhasil dimulai.`
-      );
-
-
-    case "uno":
-      return reply(
-        jid,
-        `🃏 UNO
-
-Game UNO ZazaBot aktif.
+        `🌤️ CUACA
 
 Gunakan:
-${PREFIX}uno`
+${PREFIX}cuaca Jakarta
+
+⚙️ Data cuaca membutuhkan
+API cuaca.`
       );
 
 
-    case "akinator":
-    case "akinatorstart":
+    case "jadwalshalat":
       return reply(
         jid,
-        `🔮 AKINATOR
+        `🕌 JADWAL SHALAT
 
-Mode Akinator aktif.
+Contoh:
+${PREFIX}jadwalshalat Jakarta
 
-Pikirkan seseorang lalu jawab
-pertanyaan berikut dengan:
-ya / tidak / mungkin.`
+⚙️ Data jadwal membutuhkan
+API jadwal shalat.`
       );
 
 
-    case "akinatorstop":
+    case "ipchecker":
       return reply(
         jid,
-        "🛑 Game Akinator dihentikan."
+        `🌐 IP CHECKER
+
+Gunakan:
+${PREFIX}ipchecker 8.8.8.8
+
+⚙️ Pemeriksaan IP membutuhkan
+layanan API.`
       );
 
 
-    case "redeem":
+    case "artinama":
+      if (!text) {
+        return reply(
+          jid,
+          `Contoh:\n${PREFIX}artinama Zaza`
+        );
+      }
+
       return reply(
         jid,
-        `🎁 REDEEM
-
-Masukkan kode redeem:
-
-${PREFIX}redeem KODE`
-      );
-
-
-    default:
-      return false;
-  }
-}
-
-
-/* =========================================================
-   RANDOM COMMANDS
-========================================================= */
-
-async function handleRandomCommand(
-  command,
-  jid,
-  args,
-  sender
-) {
-  const text =
-    args.join(" ").trim();
-
-  switch (command) {
-
-    case "apakah":
-      return reply(
-        jid,
-        `🔮 ${text || "pertanyaan kamu"}\n\nJawaban: ${
-          randomItem([
-            "Iya",
-            "Tidak",
-            "Mungkin",
-            "Kemungkinan besar iya",
-            "Kemungkinan besar tidak"
-          ])
-        }`
-      );
-
-
-    case "cekkhodam":
-      return reply(
-        jid,
-        `🔮 CEK KHODAM
+        `📖 ARTI NAMA
 
 Nama:
-${text || sender}
+${text}
 
-Hasil:
-${randomItem([
-  "Macan Putih 🐯",
-  "Naga Biru 🐉",
-  "Harimau 🐅",
-  "Kucing Oren 🐈",
-  "Bebek Goreng 🦆",
-  "Tidak terdeteksi 👻"
-])}`
+Untuk hasil lengkap,
+database nama dapat ditambahkan
+pada tahap berikutnya.`
       );
 
 
-    case "faktaunik":
+    case "cekidff":
+    case "cekidml":
+      if (!text) {
+        return reply(
+          jid,
+          `Contoh:\n${PREFIX}${command} 12345678`
+        );
+      }
+
       return reply(
         jid,
-        `💡 FAKTA UNIK
+        `🎮 ${command.toUpperCase()}
 
-${randomItem([
-  "Madu dapat bertahan sangat lama jika disimpan dengan baik.",
-  "Gurita memiliki tiga jantung.",
-  "Pisang secara botani termasuk buah beri.",
-  "Jantung manusia berdetak ribuan kali setiap hari."
-])}`
+ID:
+${text}
+
+⚙️ Pemeriksaan akun game
+membutuhkan API game.`
       );
 
 
-    case "katabijak":
-      return reply(
-        jid,
-        `💭 KATA BIJAK
+    case "download":
+    case "tiktoknowm":
+    case "tiktokwm":
+    case "tiktokmusic":
+    case "igdl":
+    case "igreel":
+    case "igstory":
+    case "igtv":
+    case "facebook":
+    case "twitterdl":
+    case "threads":
+    case "douyin":
+    case "mediafire":
+    case "pindl":
+    case "spotify":
+    case "ytmp3":
+    case "ytmp4":
+    case "otakudesudl":
 
-"${randomItem([
-  "Jangan takut memulai dari kecil.",
-  "Konsisten lebih penting daripada sempurna.",
-  "Kegagalan adalah bagian dari proses belajar.",
-  "Hari ini adalah kesempatan untuk menjadi lebih baik."
-])}"`
-      );
+      if (!text) {
+        return reply(
+          jid,
+          `📥 ${command.toUpperCase()}
 
+Kirim URL yang ingin diproses.
 
-    case "pantun":
-      return reply(
-        jid,
-        `🌸 PANTUN
-
-Pergi ke pasar membeli ikan,
-Ikan dibawa bersama teman.
-Terus berusaha jangan menyerah,
-Impian besar pasti tercapai kemudian.`
-      );
-
-
-    case "puisi":
-      return reply(
-        jid,
-        `🌙 PUISI
-
-Langkah kecil terus berjalan,
-Mengejar mimpi penuh harapan.
-Walau jalan penuh rintangan,
-Tetap melangkah menuju tujuan.`
-      );
-
-
-    case "quotesanime":
-      return reply(
-        jid,
-        `⚔️ QUOTES
-
-"Jangan menyerah hanya karena
-perjalananmu terasa sulit."`
-      );
-
-
-    case "rate": {
-      const nilai =
-        randomNumber(1, 100);
+Contoh:
+${PREFIX}${command} https://...`
+        );
+      }
 
       return reply(
         jid,
-        `⭐ RATE
+        `📥 ${command.toUpperCase()}
 
-${text || "Kamu"} mendapatkan nilai:
+URL diterima:
+${text}
 
-${nilai}/100`
-      );
-    }
-
-
-    case "randomnumber": {
-      const min =
-        Number(args[0]) || 1;
-
-      const max =
-        Number(args[1]) || 100;
-
-      return reply(
-        jid,
-        `🎲 Angka random:
-
-${randomNumber(min, max)}`
-      );
-    }
-
-
-    case "alay":
-      return reply(
-        jid,
-        `✨ ALAY
-
-${text
-          ? text
-              .split("")
-              .map((c, i) =>
-                i % 2
-                  ? c.toUpperCase()
-                  : c.toLowerCase()
-              )
-              .join("")
-          : "Masukkan teks."}`
-      );
-
-
-    case "hilih":
-      return reply(
-        jid,
-        text
-          ? text.replace(
-              /[aiueo]/gi,
-              "i"
-            )
-          : "Masukkan teks."
-      );
-
-
-    case "halah":
-      return reply(
-        jid,
-        text
-          ? text.replace(
-              /[aiueo]/gi,
-              "a"
-            )
-          : "Masukkan teks."
-      );
-
-
-    case "huluh":
-      return reply(
-        jid,
-        text
-          ? text.replace(
-              /[aiueo]/gi,
-              "u"
-            )
-          : "Masukkan teks."
-      );
-
-
-    case "heleh":
-      return reply(
-        jid,
-        text
-          ? text.replace(
-              /[aiueo]/gi,
-              "e"
-            )
-          : "Masukkan teks."
-      );
-
-
-    case "holoh":
-      return reply(
-        jid,
-        text
-          ? text.replace(
-              /[aiueo]/gi,
-              "o"
-            )
-          : "Masukkan teks."
+⚙️ Downloader ${command}
+memerlukan API downloader.
+Bot tidak akan memberikan
+link/file palsu.`
       );
 
 
@@ -4878,6 +3991,7 @@ function setupEvents() {
     }
   );
       }
+
 /* =========================================================
    WEB SERVER QR ZAZABOT
 ========================================================= */
@@ -5150,8 +4264,7 @@ setTimeout(function(){
   );
 
   return server;
-            }
-
+    }
 /* =========================================================
    START BOT
 ========================================================= */
@@ -5304,3 +4417,4 @@ startWebServer();
  * Jalankan WhatsApp Bot
  */
 startBot();
+  
