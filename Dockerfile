@@ -2,10 +2,9 @@ FROM node:22
 
 WORKDIR /app
 
-COPY package.json ./
-RUN npm install
+RUN npm install @whiskeysockets/baileys pino qrcode-terminal
 
-COPY . .
+COPY index.js ./
 
 EXPOSE 8080
 
