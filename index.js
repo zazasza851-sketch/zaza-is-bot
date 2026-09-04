@@ -5,11 +5,12 @@ import makeWASocket, {
 } from "@whiskeysockets/baileys";
 
 import pino from "pino";
+import QRCode from "qrcode";
 import http from "http";
 
-// ===============================
+// =====================================
 // KONFIGURASI ZAZABOT
-// ===============================
+// =====================================
 
 const BOT_NAME = "zazasza";
 const OWNER_NUMBER = "6289630747010";
@@ -18,334 +19,456 @@ const PREFIX = ".";
 
 const PORT = process.env.PORT || 8080;
 
-// ===============================
-// WEB SERVER BACK4APP
-// ===============================
+// =====================================
+// STATUS
+// =====================================
 
-let pairingCode = "MENUNGGU...";
-let connectionStatus = "STARTING";
+let qrImage = "";
+let connectionStatus = "MEMULAI ZAZABOT...";
+let botUptime = Date.now();
+
+// =====================================
+// WEB SERVER
+// =====================================
 
 const server = http.createServer((req, res) => {
+
   res.writeHead(200, {
     "Content-Type": "text/html; charset=utf-8"
   });
 
   res.end(`
 <!DOCTYPE html>
-<html>
+<html lang="id">
+
 <head>
-<meta name="viewport" content="width=device-width,initial-scale=1">
+
+<meta charset="UTF-8">
+
+<meta name="viewport"
+content="width=device-width, initial-scale=1">
+
+<meta http-equiv="refresh" content="5">
+
 <title>ZazaBot</title>
+
 <style>
-body{
-  background:#07152d;
-  color:white;
-  font-family:Arial;
-  text-align:center;
-  padding:40px 20px;
+
+* {
+  box-sizing: border-box;
 }
-.box{
-  max-width:500px;
-  margin:auto;
-  background:#10264a;
-  padding:30px;
-  border-radius:20px;
+
+body {
+  margin: 0;
+  padding: 20px;
+  background: #07152d;
+  color: white;
+  font-family: Arial, sans-serif;
+  text-align: center;
 }
-h1{color:#60a5fa}
-.code{
-  font-size:32px;
-  font-weight:bold;
-  letter-spacing:5px;
-  margin:25px 0;
+
+.container {
+  max-width: 500px;
+  margin: 30px auto;
 }
-.status{
-  font-size:18px;
+
+.card {
+  background: #10264a;
+  border-radius: 25px;
+  padding: 25px;
+  box-shadow: 0 10px 30px rgba(0,0,0,.3);
 }
+
+.logo {
+  font-size: 55px;
+}
+
+h1 {
+  margin: 5px 0;
+  color: #60a5fa;
+}
+
+.status {
+  margin: 20px 0;
+  padding: 12px;
+  border-radius: 12px;
+  background: #07152d;
+}
+
+.qr {
+  width: 280px;
+  max-width: 90%;
+  background: white;
+  padding: 12px;
+  border-radius: 15px;
+  margin: 15px auto;
+}
+
+.info {
+  line-height: 1.6;
+  color: #dbeafe;
+}
+
+.warning {
+  margin-top: 20px;
+  font-size: 13px;
+  color: #93c5fd;
+}
+
 </style>
+
 </head>
+
 <body>
-<div class="box">
-<h1>🤖 ZAZABOT</h1>
+
+<div class="container">
+
+<div class="card">
+
+<div class="logo">🤖</div>
+
+<h1>ZAZABOT</h1>
+
 <p>WhatsApp Bot</p>
 
 <div class="status">
 Status: <b>${connectionStatus}</b>
 </div>
 
-<p>PAIRING CODE</p>
+${
+  qrImage
+    ? `
+      <p>📱 Scan QR ini menggunakan WhatsApp</p>
 
-<div class="code">
-${pairingCode}
+      <img
+        class="qr"
+        src="${qrImage}"
+        alt="QR ZazaBot"
+      >
+
+      <div class="info">
+        WhatsApp → Perangkat tertaut
+        → Tautkan perangkat
+        → Scan QR
+      </div>
+    `
+    : `
+      <p>⏳ QR sedang dibuat...</p>
+      <p>Tunggu beberapa detik lalu halaman akan diperbarui.</p>
+    `
+}
+
+<div class="warning">
+Jangan bagikan QR ini kepada orang lain.
 </div>
 
-<p>Gunakan kode tersebut di WhatsApp pada nomor bot.</p>
 </div>
+
+</div>
+
 </body>
+
 </html>
 `);
+
 });
 
 server.listen(PORT, "0.0.0.0", () => {
+
   console.log("=================================");
   console.log("🌐 ZAZABOT WEB SERVER AKTIF");
   console.log("PORT:", PORT);
   console.log("=================================");
+
 });
 
-// ===============================
-// BOT
-// ===============================
+// =====================================
+// START BOT
+// =====================================
 
 async function startBot() {
-  const { state, saveCreds } =
-    await useMultiFileAuthState("./session");
 
-  const sock = makeWASocket({
-    auth: state,
+  try {
 
-    browser: Browsers.ubuntu("ZazaBot"),
-
-    printQRInTerminal: false,
-
-    logger: pino({
-      level: "silent"
-    }),
-
-    markOnlineOnConnect: false,
-
-    syncFullHistory: false
-  });
-
-  sock.ev.on("creds.update", saveCreds);
-
-  let pairingRequested = false;
-
-  // ===============================
-  // CONNECTION UPDATE
-  // ===============================
-
-  sock.ev.on("connection.update", async (update) => {
     const {
-      connection,
-      lastDisconnect,
-      qr
-    } = update;
+      state,
+      saveCreds
+    } = await useMultiFileAuthState("./session");
 
-    console.log(
-      "CONNECTION UPDATE:",
-      connection || "waiting"
+    const sock = makeWASocket({
+
+      auth: state,
+
+      browser: Browsers.ubuntu("ZazaBot"),
+
+      printQRInTerminal: false,
+
+      logger: pino({
+        level: "silent"
+      }),
+
+      markOnlineOnConnect: false,
+
+      syncFullHistory: false
+
+    });
+
+    sock.ev.on(
+      "creds.update",
+      saveCreds
     );
 
-    // ===============================
-    // PAIRING CODE
-    // ===============================
+    // =================================
+    // CONNECTION UPDATE
+    // =================================
 
-    if (
-      qr &&
-      !pairingRequested &&
-      !state.creds.registered
-    ) {
-      pairingRequested = true;
+    sock.ev.on(
+      "connection.update",
+      async (update) => {
 
-      console.log("");
-      console.log("=================================");
-      console.log("🔑 MEMBUAT PAIRING CODE ZAZABOT");
-      console.log("=================================");
-
-      try {
-        const code =
-          await sock.requestPairingCode(BOT_NUMBER);
-
-        pairingCode = code;
-
-        console.log("");
-        console.log("=================================");
-        console.log("🔑 PAIRING CODE ZAZABOT");
-        console.log(code);
-        console.log("=================================");
-        console.log("");
-
-      } catch (error) {
-
-        pairingRequested = false;
-
-        pairingCode = "GAGAL";
-
-        console.error(
-          "❌ GAGAL MEMBUAT PAIRING CODE"
-        );
-
-        console.error(error);
-      }
-    }
-
-    // ===============================
-    // CONNECTED
-    // ===============================
-
-    if (connection === "open") {
-
-      connectionStatus = "CONNECTED";
-
-      pairingCode = "TERHUBUNG";
-
-      console.log("");
-      console.log("=================================");
-      console.log("✅ ZAZABOT BERHASIL TERHUBUNG");
-      console.log("=================================");
-      console.log("");
-    }
-
-    // ===============================
-    // DISCONNECTED
-    // ===============================
-
-    if (connection === "close") {
-
-      connectionStatus = "DISCONNECTED";
-
-      const statusCode =
-        lastDisconnect?.error?.output?.statusCode;
-
-      console.log("");
-      console.log("=================================");
-      console.log("⚠️ KONEKSI TERPUTUS");
-      console.log("STATUS:", statusCode);
-      console.log("=================================");
-
-      if (
-        statusCode !== DisconnectReason.loggedOut
-      ) {
+        const {
+          connection,
+          lastDisconnect,
+          qr
+        } = update;
 
         console.log(
-          "🔄 Mencoba menghubungkan kembali..."
+          "CONNECTION:",
+          connection || "waiting"
         );
 
-        setTimeout(() => {
-          startBot();
-        }, 5000);
-
-      } else {
-
-        console.log(
-          "❌ WhatsApp melakukan logout."
-        );
-      }
-    }
-  });
-
-  // ===============================
-  // PESAN MASUK
-  // ===============================
-
-  sock.ev.on(
-    "messages.upsert",
-    async ({ messages }) => {
-
-      for (const msg of messages) {
-
-        if (!msg.message) continue;
-
-        const jid = msg.key.remoteJid;
-
-        if (!jid) continue;
-
-        const text =
-          msg.message.conversation ||
-          msg.message.extendedTextMessage?.text ||
-          msg.message.imageMessage?.caption ||
-          msg.message.videoMessage?.caption ||
-          "";
-
-        if (!text.startsWith(PREFIX)) {
-          continue;
-        }
-
-        const command =
-          text
-            .slice(PREFIX.length)
-            .trim()
-            .split(/\s+/)[0]
-            .toLowerCase();
-
         // ===============================
-        // PING
+        // QR BARU
         // ===============================
 
-        if (command === "ping") {
+        if (qr) {
 
-          await sock.sendMessage(
-            jid,
-            {
-              text:
-                "🏓 PONG!\n\n" +
-                "🤖 ZazaBot aktif."
-            }
-          );
+          console.log("");
+          console.log("=================================");
+          console.log("📱 QR ZAZABOT TERSEDIA");
+          console.log("=================================");
 
-        }
+          try {
 
-        // ===============================
-        // OWNER
-        // ===============================
+            qrImage =
+              await QRCode.toDataURL(qr, {
+                width: 500,
+                margin: 2
+              });
 
-        else if (command === "owner") {
+            connectionStatus =
+              "MENUNGGU SCAN QR";
 
-          await sock.sendMessage(
-            jid,
-            {
-              text:
-                "👑 OWNER ZAZABOT\n\n" +
-                "📱 wa.me/" +
-                OWNER_NUMBER
-            }
-          );
-
-        }
-
-        // ===============================
-        // RUNTIME
-        // ===============================
-
-        else if (command === "runtime") {
-
-          const uptime =
-            process.uptime();
-
-          const hours =
-            Math.floor(uptime / 3600);
-
-          const minutes =
-            Math.floor(
-              (uptime % 3600) / 60
+            console.log(
+              "✅ QR berhasil dibuat"
             );
 
-          const seconds =
-            Math.floor(uptime % 60);
+            console.log(
+              "🌐 Buka URL ZazaBot untuk scan QR"
+            );
 
-          await sock.sendMessage(
-            jid,
-            {
-              text:
-                "⏱️ ZAZABOT RUNTIME\n\n" +
-                `${hours} jam ${minutes} menit ${seconds} detik`
-            }
-          );
+          } catch (error) {
+
+            console.error(
+              "❌ GAGAL MEMBUAT GAMBAR QR"
+            );
+
+            console.error(error);
+
+          }
+
         }
 
         // ===============================
-        // MENU
+        // TERHUBUNG
         // ===============================
 
-        else if (command === "menu") {
+        if (connection === "open") {
 
-          const menu = `
+          connectionStatus =
+            "🟢 ZAZABOT TERHUBUNG";
+
+          qrImage = "";
+
+          console.log("");
+          console.log("=================================");
+          console.log("✅ ZAZABOT BERHASIL TERHUBUNG");
+          console.log("=================================");
+          console.log("");
+
+        }
+
+        // ===============================
+        // TERPUTUS
+        // ===============================
+
+        if (connection === "close") {
+
+          connectionStatus =
+            "🔴 KONEKSI TERPUTUS";
+
+          const statusCode =
+            lastDisconnect
+              ?.error
+              ?.output
+              ?.statusCode;
+
+          console.log("");
+          console.log("=================================");
+          console.log("⚠️ KONEKSI TERPUTUS");
+          console.log("STATUS:", statusCode);
+          console.log("=================================");
+
+          if (
+            statusCode !==
+            DisconnectReason.loggedOut
+          ) {
+
+            console.log(
+              "🔄 MENGHUBUNGKAN KEMBALI..."
+            );
+
+            setTimeout(() => {
+
+              startBot();
+
+            }, 5000);
+
+          } else {
+
+            console.log(
+              "❌ ZazaBot telah logout."
+            );
+
+          }
+
+        }
+
+      }
+    );
+
+    // =================================
+    // PESAN MASUK
+    // =================================
+
+    sock.ev.on(
+      "messages.upsert",
+      async ({ messages }) => {
+
+        for (const msg of messages) {
+
+          if (!msg.message) continue;
+
+          if (msg.key.fromMe) continue;
+
+          const jid =
+            msg.key.remoteJid;
+
+          if (!jid) continue;
+
+          const text =
+            msg.message.conversation ||
+            msg.message.extendedTextMessage?.text ||
+            msg.message.imageMessage?.caption ||
+            msg.message.videoMessage?.caption ||
+            "";
+
+          if (!text.startsWith(PREFIX)) {
+            continue;
+          }
+
+          const args =
+            text
+              .slice(PREFIX.length)
+              .trim()
+              .split(/\s+/);
+
+          const command =
+            args.shift()?.toLowerCase();
+
+          // ============================
+          // PING
+          // ============================
+
+          if (command === "ping") {
+
+            await sock.sendMessage(
+              jid,
+              {
+                text:
+                  "🏓 PONG!\n\n" +
+                  "🤖 ZazaBot aktif."
+              }
+            );
+
+          }
+
+          // ============================
+          // OWNER
+          // ============================
+
+          else if (command === "owner") {
+
+            await sock.sendMessage(
+              jid,
+              {
+                text:
+                  "👑 OWNER ZAZABOT\n\n" +
+                  "📱 wa.me/" +
+                  OWNER_NUMBER
+              }
+            );
+
+          }
+
+          // ============================
+          // RUNTIME
+          // ============================
+
+          else if (command === "runtime") {
+
+            const uptime =
+              Math.floor(
+                (Date.now() - botUptime) / 1000
+              );
+
+            const hours =
+              Math.floor(uptime / 3600);
+
+            const minutes =
+              Math.floor(
+                (uptime % 3600) / 60
+              );
+
+            const seconds =
+              uptime % 60;
+
+            await sock.sendMessage(
+              jid,
+              {
+                text:
+                  "⏱️ ZAZABOT RUNTIME\n\n" +
+                  `${hours} jam ` +
+                  `${minutes} menit ` +
+                  `${seconds} detik`
+              }
+            );
+
+          }
+
+          // ============================
+          // MENU
+          // ============================
+
+          else if (command === "menu") {
+
+            const menu = `
 ╭━━━〔 🤖 ZAZABOT 〕━━━╮
 ┃
 ┃ 👋 Halo!
 ┃
-┃ Bot: ${BOT_NAME}
-┃ Prefix: ${PREFIX}
+┃ Bot     : ${BOT_NAME}
+┃ Prefix  : ${PREFIX}
 ┃
 ┣━━〔 GENERAL 〕━━
 ┃ .menu
@@ -408,37 +531,43 @@ async function startBot() {
 ┃ .tourl
 ┃ .readmore
 ┃
-┣━━〔 INFO 〕━━
-┃ .runtime
-┃ .ping
-┃ .owner
-┃
 ╰━━━━━━━━━━━━━━╯
 
 ⚡ ZazaBot siap digunakan.
 `;
 
-          await sock.sendMessage(
-            jid,
-            {
-              text: menu
-            }
-          );
+            await sock.sendMessage(
+              jid,
+              {
+                text: menu
+              }
+            );
+
+          }
+
         }
+
       }
-    }
-  );
+    );
+
+  } catch (error) {
+
+    console.error(
+      "❌ ERROR START BOT:"
+    );
+
+    console.error(error);
+
+    setTimeout(() => {
+      startBot();
+    }, 10000);
+
+  }
+
 }
 
-// ===============================
-// START
-// ===============================
+// =====================================
+// JALANKAN BOT
+// =====================================
 
-startBot().catch((error) => {
-
-  console.error(
-    "❌ ERROR START BOT:"
-  );
-
-  console.error(error);
-});
+startBot();
