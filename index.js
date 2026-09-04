@@ -8,10 +8,6 @@ import pino from "pino";
 import QRCode from "qrcode";
 import http from "http";
 
-// =====================================
-// KONFIGURASI ZAZABOT
-// =====================================
-
 const BOT_NAME = "zazasza";
 const OWNER_NUMBER = "6289630747010";
 const BOT_NUMBER = "6285866438941";
@@ -19,17 +15,189 @@ const PREFIX = ".";
 
 const PORT = process.env.PORT || 8080;
 
-// =====================================
-// STATUS
-// =====================================
-
 let qrImage = "";
 let connectionStatus = "MEMULAI ZAZABOT...";
 let botUptime = Date.now();
 
-// =====================================
-// WEB SERVER
-// =====================================
+
+// =====================================================
+// DAFTAR MENU ZAZABOT
+// =====================================================
+
+const MENU = {
+
+  GROUP: [
+    "absen","add","addalarm","addbadword","addlist","updatelist","uplist",
+    "addpoin","addreminder","afk","antibadword","antibadwordnokick",
+    "antibot","antidelete","antilink","antilinkchannel","antilinknokick",
+    "antiluar","antimentionsw","antiviewonce","antiwame","antiwamenokick",
+    "banmember","blacklist","delblacklist","listblacklist","resetblacklist",
+    "cekabsen","cekidgroup","cekpoint","ceksewa","ceksewabyid","cekwarn",
+    "createschedulecall","delalarm","delbadword","delete","deleteabsen",
+    "deletepoin","deletetotalpesan","dellist","delreminder","delultahku",
+    "delwarn","demote","demotedetector","descgc","disablealarm","done",
+    "enablealarm","gamemode","getlist","groupadmin","groupinfo",
+    "groupschedule","groupsetting","grouptime","hidetag","kick","kickme",
+    "left","levelling","linkgc","revokelink","list","listalarm",
+    "listbadword","listbanmember","listpoint","listreminder",
+    "listtotalpesan","listultah","listwarn","mulaiabsen","mute","pinmsg",
+    "promote","promotedetector","proses","refreshgroup","resetalarm",
+    "resetbadword","resetlist","resetpoint","resetreminder",
+    "resettotalpesan","resetultahku","resetwarn","setdescgc","setnamegc",
+    "setopen","setclose","setppgc","setppgcpanjang","setproses","setdone",
+    "setwarn","setwelcome","setleft","setwelcometype","setlefttype",
+    "sider","tagall","tfpoint","totag","totalpesan","ultahku","unbanmember",
+    "unpinmsg","vote","warn","welcome"
+  ],
+
+  OWNER: [
+    "addbalance","addlevel","addlimit","addpremium","addrespon","addsewa",
+    "addsewathisgroup","addxp","anticall","anticallnoblock","antideletepc",
+    "autoleavegcnosewa","autonexara","autoread","autotype","ban",
+    "blacklistglobal","delblacklistglobal","listblacklistglobal",
+    "resetblacklistglobal","block","broadcast","bccancel","bcconfirm",
+    "bcgroup","bcgchidetag","bchidetag","bcmember","bcpremium","bcpc",
+    "bcsewa","bcstat","buttonmode","buttontojson","call","cekaccount",
+    "cekopenaikey","chatgroup","clearchat","copythumbnail","createbutton",
+    "createfullbutton","createlist","createredeem","createthumbnail",
+    "delbalance","dellevel","dellimit","delpremium","deleteredeem",
+    "delrespon","delsewa","delxp","freeautores","delfreeautores",
+    "listfreeautores","resetfreeautores","freecommand","delfreecommand",
+    "listfreecommand","resetfreecommand","globalgamemode","golink",
+    "grabcontact","grouponlypremium","inforedeem","inviteme","join",
+    "leaveall","leavegcbyid","levellingpc","listredeem","listrespon",
+    "listsewa","listsewapermanent","mutebc","mutebyid","mycontacts",
+    "onlygroup","onlyindo","onlyprem","pconlyprem","premiumgroup",
+    "promoteme","public","publicbyid","queue","react","refreshgroupbyid",
+    "refreshpremiumlist","resetanonymous","resetbalance",
+    "resetblacklistglobal","resetfreeautores","resetfreecommand",
+    "resetlevel","resetlimit","resetxp","resetlimitreceivedgroup",
+    "resetpremium","resetresponsee","self","selfbyid","setbio","setcommand",
+    "setdefaultweltype","setlimitgroup","setlimitreceivedgroup","setname",
+    "setopenaikey","setpp","setpppanjang","setwrsuit","setwrttt",
+    "testbutton","unban","unblock","unreact","upchannel","upres",
+    "upswgroup","upswmentiongroup","upswmentiongroupsilent","upswpremium",
+    "videocall"
+  ],
+
+  AI: [
+    "aiimage","bard","jadianime","nexara","byenexara","openai","voicejapan"
+  ],
+
+  GAME: [
+    "akinator","akinatorstart","akinatorstop","asahotak","caklontong",
+    "dare","family100","hint","math","nyerah","redeem","sambungkata",
+    "siapakahaku","sloth","susunkalimat","susunkata","susunlirik",
+    "tebakbendera","tebakbom","tebakchara","tebakfisika","tebakgambar",
+    "tebakkata","tebaklagu","tebaklaguanime","tebaklagukpop","tekateki",
+    "tfbalance","truth","ulartangga","uno"
+  ],
+
+  RANDOM: [
+    "alay","apakah","cekkhodam","faktaunik","husbu","jadian","kapankah",
+    "katabijak","loli","pantun","ppcouple","puisi","quotesanime",
+    "randomanime","randommeme","randomnumber","randomtag","rate",
+    "siapakah","neko","waifu"
+  ],
+
+  SEARCH: [
+    "alkitab","alquranaudio","artinama","brainly","cekidff","cekidml",
+    "cuaca","dorama","google","googleimage","igstalk","ipchecker",
+    "jadwalshalat","lirik","otakudesuinfo","otakudesuongoing",
+    "otakudesu","pinterest","play","wikipedia","ytsearch"
+  ],
+
+  STICKER: [
+    "attp","brat","bratvideo","delsetwm","quickchat","semoji",
+    "semojimix","setwm","sticker","stickercircle","stickerinfo",
+    "stickerly","smeme","snobg","stickerwm","takesticker","telestick",
+    "toimg","trigger","ttp","ziptelestick"
+  ],
+
+  TOOLS: [
+    "blur","cekplatform","ehex","dhex","ebase64","dbase64","enc","dec",
+    "fakereply","hartatahta","iqc","kirim","confess","menfess","nulis",
+    "folio","ocr","poll","ptvtovideo","qrcode","qrcodereader","readmore",
+    "readviewonce","removebackground","screenshot","shortlink","myemail",
+    "getemail","tomp3","tovn","toquickvideo","tourl","toviewonce",
+    "translate","tts","tts2","upscale","halah","hilih","huluh","heleh",
+    "holoh","ytcomment"
+  ],
+
+  INFO: [
+    "buylimit","cekpremium","infocovid","infogempa","infounsur",
+    "kodebahasa","leavenosewa","level","limit","balance","listban",
+    "listblock","listcommand","listgroup","listgroupnosewa",
+    "listonline","listpremium","listpremiumgroup","profile","report",
+    "status","topglobal","toplocal"
+  ],
+
+  DOWNLOAD: [
+    "douyin","facebook","igstory","igdl","igtv","igreel","mediafire",
+    "otakudesudl","pindl","spotify","threads","tiktoknowm","tiktokwm",
+    "tiktokmusic","twitterdl","ytmp3","ytmp4"
+  ],
+
+  TEXTMAKER: [
+    "window","blankpink","thunder","bear","cloud","neonlight","sand",
+    "glow","neon","sky","cartoon","greenneon","halloween","bokeh",
+    "firework","narutologo","colorneon","digitalglitch","wetglass",
+    "watercolor","pubglogo","fflogo","glitch","thor","wolf","phlogo",
+    "avangers","spacetext","marvel","graffiti","deadpool","lightglow",
+    "blackpink","dropwater","magma","pencil","bisnissign","batman","holo"
+  ],
+
+  GENERAL: [
+    "sewabot",
+    "premium user",
+    "up balance",
+    "up xp",
+    "up level",
+    "owner",
+    "ping",
+    "runtime"
+  ]
+
+};
+
+
+// =====================================================
+// MEMBUAT TEKS MENU OTOMATIS
+// =====================================================
+
+function createMenu() {
+
+  let menu = "";
+
+  menu += "╭━━━〔 🤖 ZAZABOT 〕━━━╮\n";
+  menu += "┃\n";
+  menu += "┃ 👋 Halo!\n";
+  menu += `┃ Bot     : ${BOT_NAME}\n`;
+  menu += `┃ Prefix  : ${PREFIX}\n`;
+  menu += "┃\n";
+
+  for (const [category, commands] of Object.entries(MENU)) {
+
+    menu += `┣━━〔 ${category} 〕━━\n`;
+
+    for (const command of commands) {
+      menu += `┃ ${PREFIX}${command}\n`;
+    }
+
+    menu += "┃\n";
+  }
+
+  menu += "╰━━━━━━━━━━━━━━╯\n\n";
+  menu += "⚡ ZazaBot siap digunakan.\n\n";
+  menu += "@_zazasza";
+
+  return menu;
+}
+
+
+// =====================================================
+// WEB SERVER UNTUK QR
+// =====================================================
 
 const server = http.createServer((req, res) => {
 
@@ -38,7 +206,9 @@ const server = http.createServer((req, res) => {
   });
 
   res.end(`
+
 <!DOCTYPE html>
+
 <html lang="id">
 
 <head>
@@ -132,7 +302,8 @@ h1 {
 <p>WhatsApp Bot</p>
 
 <div class="status">
-Status: <b>${connectionStatus}</b>
+Status:
+<b>${connectionStatus}</b>
 </div>
 
 ${
@@ -154,7 +325,7 @@ ${
     `
     : `
       <p>⏳ QR sedang dibuat...</p>
-      <p>Tunggu beberapa detik lalu halaman akan diperbarui.</p>
+      <p>Tunggu beberapa detik.</p>
     `
 }
 
@@ -169,6 +340,7 @@ Jangan bagikan QR ini kepada orang lain.
 </body>
 
 </html>
+
 `);
 
 });
@@ -182,18 +354,17 @@ server.listen(PORT, "0.0.0.0", () => {
 
 });
 
-// =====================================
+
+// =====================================================
 // START BOT
-// =====================================
+// =====================================================
 
 async function startBot() {
 
   try {
 
-    const {
-      state,
-      saveCreds
-    } = await useMultiFileAuthState("./session");
+    const { state, saveCreds } =
+      await useMultiFileAuthState("./session");
 
     const sock = makeWASocket({
 
@@ -213,14 +384,18 @@ async function startBot() {
 
     });
 
+
+    // SIMPAN SESSION
+
     sock.ev.on(
       "creds.update",
       saveCreds
     );
 
-    // =================================
-    // CONNECTION UPDATE
-    // =================================
+
+    // =================================================
+    // CONNECTION
+    // =================================================
 
     sock.ev.on(
       "connection.update",
@@ -232,29 +407,41 @@ async function startBot() {
           qr
         } = update;
 
+
         console.log(
           "CONNECTION:",
           connection || "waiting"
         );
 
+
         // ===============================
-        // QR BARU
+        // QR
         // ===============================
 
         if (qr) {
 
           console.log("");
-          console.log("=================================");
-          console.log("📱 QR ZAZABOT TERSEDIA");
-          console.log("=================================");
+          console.log(
+            "================================="
+          );
+          console.log(
+            "📱 QR ZAZABOT TERSEDIA"
+          );
+          console.log(
+            "================================="
+          );
+
 
           try {
 
             qrImage =
-              await QRCode.toDataURL(qr, {
-                width: 500,
-                margin: 2
-              });
+              await QRCode.toDataURL(
+                qr,
+                {
+                  width: 500,
+                  margin: 2
+                }
+              );
 
             connectionStatus =
               "MENUNGGU SCAN QR";
@@ -263,14 +450,10 @@ async function startBot() {
               "✅ QR berhasil dibuat"
             );
 
-            console.log(
-              "🌐 Buka URL ZazaBot untuk scan QR"
-            );
-
           } catch (error) {
 
             console.error(
-              "❌ GAGAL MEMBUAT GAMBAR QR"
+              "❌ GAGAL MEMBUAT QR"
             );
 
             console.error(error);
@@ -279,8 +462,9 @@ async function startBot() {
 
         }
 
+
         // ===============================
-        // TERHUBUNG
+        // CONNECTED
         // ===============================
 
         if (connection === "open") {
@@ -291,15 +475,22 @@ async function startBot() {
           qrImage = "";
 
           console.log("");
-          console.log("=================================");
-          console.log("✅ ZAZABOT BERHASIL TERHUBUNG");
-          console.log("=================================");
+          console.log(
+            "================================="
+          );
+          console.log(
+            "✅ ZAZABOT BERHASIL TERHUBUNG"
+          );
+          console.log(
+            "================================="
+          );
           console.log("");
 
         }
 
+
         // ===============================
-        // TERPUTUS
+        // CLOSED
         // ===============================
 
         if (connection === "close") {
@@ -313,11 +504,25 @@ async function startBot() {
               ?.output
               ?.statusCode;
 
+
           console.log("");
-          console.log("=================================");
-          console.log("⚠️ KONEKSI TERPUTUS");
-          console.log("STATUS:", statusCode);
-          console.log("=================================");
+          console.log(
+            "================================="
+          );
+
+          console.log(
+            "⚠️ KONEKSI TERPUTUS"
+          );
+
+          console.log(
+            "STATUS:",
+            statusCode
+          );
+
+          console.log(
+            "================================="
+          );
+
 
           if (
             statusCode !==
@@ -328,11 +533,12 @@ async function startBot() {
               "🔄 MENGHUBUNGKAN KEMBALI..."
             );
 
-            setTimeout(() => {
-
-              startBot();
-
-            }, 5000);
+            setTimeout(
+              () => {
+                startBot();
+              },
+              5000
+            );
 
           } else {
 
@@ -347,9 +553,10 @@ async function startBot() {
       }
     );
 
-    // =================================
+
+    // =================================================
     // PESAN MASUK
-    // =================================
+    // =================================================
 
     sock.ev.on(
       "messages.upsert",
@@ -361,10 +568,12 @@ async function startBot() {
 
           if (msg.key.fromMe) continue;
 
+
           const jid =
             msg.key.remoteJid;
 
           if (!jid) continue;
+
 
           const text =
             msg.message.conversation ||
@@ -373,9 +582,10 @@ async function startBot() {
             msg.message.videoMessage?.caption ||
             "";
 
-          if (!text.startsWith(PREFIX)) {
+
+          if (!text.startsWith(PREFIX))
             continue;
-          }
+
 
           const args =
             text
@@ -383,14 +593,40 @@ async function startBot() {
               .trim()
               .split(/\s+/);
 
+
           const command =
-            args.shift()?.toLowerCase();
+            args
+              .shift()
+              ?.toLowerCase();
 
-          // ============================
+
+          console.log(
+            "COMMAND:",
+            command
+          );
+
+
+          // =================================================
+          // MENU
+          // =================================================
+
+          if (command === "menu") {
+
+            await sock.sendMessage(
+              jid,
+              {
+                text: createMenu()
+              }
+            );
+
+          }
+
+
+          // =================================================
           // PING
-          // ============================
+          // =================================================
 
-          if (command === "ping") {
+          else if (command === "ping") {
 
             await sock.sendMessage(
               jid,
@@ -403,9 +639,10 @@ async function startBot() {
 
           }
 
-          // ============================
+
+          // =================================================
           // OWNER
-          // ============================
+          // =================================================
 
           else if (command === "owner") {
 
@@ -421,9 +658,10 @@ async function startBot() {
 
           }
 
-          // ============================
+
+          // =================================================
           // RUNTIME
-          // ============================
+          // =================================================
 
           else if (command === "runtime") {
 
@@ -432,16 +670,22 @@ async function startBot() {
                 (Date.now() - botUptime) / 1000
               );
 
+
             const hours =
-              Math.floor(uptime / 3600);
+              Math.floor(
+                uptime / 3600
+              );
+
 
             const minutes =
               Math.floor(
                 (uptime % 3600) / 60
               );
 
+
             const seconds =
               uptime % 60;
+
 
             await sock.sendMessage(
               jid,
@@ -456,90 +700,19 @@ async function startBot() {
 
           }
 
-          // ============================
-          // MENU
-          // ============================
 
-          else if (command === "menu") {
+          // =================================================
+          // COMMAND BELUM DIBUAT
+          // =================================================
 
-            const menu = `
-╭━━━〔 🤖 ZAZABOT 〕━━━╮
-┃
-┃ 👋 Halo!
-┃
-┃ Bot     : ${BOT_NAME}
-┃ Prefix  : ${PREFIX}
-┃
-┣━━〔 GENERAL 〕━━
-┃ .menu
-┃ .ping
-┃ .runtime
-┃ .owner
-┃
-┣━━〔 GROUP 〕━━
-┃ .add
-┃ .kick
-┃ .promote
-┃ .demote
-┃ .antilink
-┃ .welcome
-┃ .goodbye
-┃ .tagall
-┃ .hidetag
-┃
-┣━━〔 AI 〕━━
-┃ .ai
-┃ .openai
-┃ .nexara
-┃ .aiimage
-┃
-┣━━〔 GAME 〕━━
-┃ .akinator
-┃ .asahotak
-┃ .caklontong
-┃ .family100
-┃ .math
-┃ .truth
-┃ .dare
-┃
-┣━━〔 STICKER 〕━━
-┃ .sticker
-┃ .attp
-┃ .ttp
-┃ .toimg
-┃
-┣━━〔 SEARCH 〕━━
-┃ .google
-┃ .googleimage
-┃ .wikipedia
-┃ .ytsearch
-┃ .lirik
-┃
-┣━━〔 DOWNLOAD 〕━━
-┃ .tiktoknowm
-┃ .tiktokwm
-┃ .igdl
-┃ .igreel
-┃ .facebook
-┃ .ytmp3
-┃ .ytmp4
-┃
-┣━━〔 TOOLS 〕━━
-┃ .shortlink
-┃ .ssweb
-┃ .qrcode
-┃ .tourl
-┃ .readmore
-┃
-╰━━━━━━━━━━━━━━╯
-
-⚡ ZazaBot siap digunakan.
-`;
+          else {
 
             await sock.sendMessage(
               jid,
               {
-                text: menu
+                text:
+                  `❌ Perintah .${command} belum aktif.\n\n` +
+                  `Gunakan .menu untuk melihat daftar perintah.`
               }
             );
 
@@ -550,7 +723,10 @@ async function startBot() {
       }
     );
 
-  } catch (error) {
+  }
+
+
+  catch (error) {
 
     console.error(
       "❌ ERROR START BOT:"
@@ -558,16 +734,21 @@ async function startBot() {
 
     console.error(error);
 
-    setTimeout(() => {
-      startBot();
-    }, 10000);
+
+    setTimeout(
+      () => {
+        startBot();
+      },
+      10000
+    );
 
   }
 
 }
 
-// =====================================
+
+// =====================================================
 // JALANKAN BOT
-// =====================================
+// =====================================================
 
 startBot();
