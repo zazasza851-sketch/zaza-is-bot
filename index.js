@@ -1,14 +1,15 @@
 import makeWASocket, {
   useMultiFileAuthState,
-  DisconnectReason
+  DisconnectReason,
+  Browsers
 } from "@whiskeysockets/baileys";
 
 import P from "pino";
 import http from "http";
 
-// ========================================
+// ==========================================
 // KONFIGURASI ZAZABOT
-// ========================================
+// ==========================================
 
 const BOT_NUMBER = "6285866438941";
 const OWNER_NUMBER = "6289630747010";
@@ -19,21 +20,20 @@ const PREFIX = ".";
 const PORT = process.env.PORT || 8080;
 
 let sock = null;
-let pairingCode = "BELUM TERSEDIA";
-let statusBot = "Menunggu WhatsApp";
+let pairingCode = "MENUNGGU...";
+let botStatus = "🟡 Memulai ZazaBot...";
+let pairingRequested = false;
 
-// ========================================
+// ==========================================
 // WEB SERVER
-// ========================================
+// ==========================================
 
 const server = http.createServer((req, res) => {
-
   res.writeHead(200, {
     "Content-Type": "text/html; charset=utf-8"
   });
 
   if (req.url === "/") {
-
     res.end(`
 <!DOCTYPE html>
 <html>
@@ -42,49 +42,48 @@ const server = http.createServer((req, res) => {
 <title>ZazaBot</title>
 
 <style>
-body{
-  margin:0;
-  background:#071a36;
-  color:white;
-  font-family:Arial,sans-serif;
-  text-align:center;
+body {
+  margin: 0;
+  background: #071a36;
+  color: white;
+  font-family: Arial, sans-serif;
+  text-align: center;
 }
 
-.container{
-  max-width:500px;
-  margin:auto;
-  padding:40px 20px;
+.container {
+  max-width: 500px;
+  margin: auto;
+  padding: 30px 20px;
 }
 
-.card{
-  background:#102b52;
-  padding:25px;
-  border-radius:20px;
-  margin-top:25px;
+.card {
+  background: #102b52;
+  padding: 25px;
+  border-radius: 20px;
+  margin-top: 20px;
 }
 
-.code{
-  font-size:32px;
-  font-weight:bold;
-  letter-spacing:6px;
-  background:#06152c;
-  padding:20px;
-  border-radius:15px;
-  margin:20px 0;
+.code {
+  font-size: 30px;
+  font-weight: bold;
+  letter-spacing: 5px;
+  background: #06152c;
+  padding: 20px;
+  border-radius: 15px;
+  margin: 20px 0;
 }
 
-button{
-  background:#1683ff;
-  color:white;
-  border:0;
-  padding:14px 25px;
-  border-radius:12px;
-  font-size:16px;
+.button {
+  display: inline-block;
+  background: #1683ff;
+  color: white;
+  padding: 14px 22px;
+  border-radius: 12px;
+  text-decoration: none;
 }
 
-a{
-  color:white;
-  text-decoration:none;
+.status {
+  font-size: 20px;
 }
 </style>
 </head>
@@ -93,15 +92,19 @@ a{
 
 <div class="container">
 
-<h1>🤖 ZazaBot</h1>
+<h1>🤖 ${BOT_NAME}</h1>
 
 <div class="card">
 
 <h2>Status</h2>
 
-<p>${statusBot}</p>
+<div class="status">
+${botStatus}
+</div>
 
-<hr>
+</div>
+
+<div class="card">
 
 <h3>📱 Nomor Bot</h3>
 
@@ -113,29 +116,26 @@ a{
 ${pairingCode}
 </div>
 
-<a href="/pair">
-<button>🔄 Buat Pairing Code</button>
-</a>
+<p>
+Jika kode sudah muncul, buka WhatsApp pada
+nomor bot dan pilih:
+</p>
+
+<p>
+<b>Setelan → Perangkat tertaut → Tautkan perangkat → Tautkan dengan nomor telepon</b>
+</p>
 
 </div>
 
 <div class="card">
 
-<h3>Cara Menghubungkan</h3>
-
-<p>
-WhatsApp → Perangkat tertaut →
-Tautkan perangkat →
-Tautkan dengan nomor telepon
-</p>
-
-<p>
-Masukkan kode pairing di atas.
-</p>
+<a class="button" href="/">
+🔄 Refresh
+</a>
 
 </div>
 
-<p>© ZazaBot</p>
+<p>© ${BOT_NAME}</p>
 
 </div>
 
@@ -146,225 +146,232 @@ Masukkan kode pairing di atas.
     return;
   }
 
-  if (req.url === "/pair") {
-
-    if (!sock) {
-
-      res.end(`
-        <h2>Bot belum siap.</h2>
-        <p>Tunggu beberapa detik lalu buka kembali.</p>
-      `);
-
-      return;
-    }
-
-    try {
-
-      if (sock.authState?.creds?.registered) {
-
-        pairingCode = "SUDAH TERHUBUNG";
-
-      } else {
-
-        const code =
-          await sock.requestPairingCode(BOT_NUMBER);
-
-        pairingCode = code;
-
-        console.log("");
-        console.log("==============================");
-        console.log("🔑 PAIRING CODE ZAZABOT");
-        console.log("CODE:", code);
-        console.log("==============================");
-        console.log("");
-
-      }
-
-      res.writeHead(302, {
-        Location: "/"
-      });
-
-      res.end();
-
-    } catch (error) {
-
-      console.log("PAIRING ERROR:", error);
-
-      res.writeHead(500, {
-        "Content-Type": "text/plain"
-      });
-
-      res.end(
-        "Gagal membuat pairing code: " +
-        error.message
-      );
-    }
-
-    return;
-  }
-
   res.writeHead(404);
-
   res.end("404");
 });
 
+// ==========================================
+// START WEB SERVER
+// ==========================================
+
 server.listen(PORT, "0.0.0.0", () => {
-
-  console.log(
-    `🌐 ${BOT_NAME} aktif di port ${PORT}`
-  );
-
+  console.log("====================================");
+  console.log("🌐 ZazaBot Web Server AKTIF");
+  console.log("📡 PORT:", PORT);
+  console.log("====================================");
 });
 
-// ========================================
-// START WHATSAPP
-// ========================================
+// ==========================================
+// FUNGSI START BOT
+// ==========================================
 
 async function startBot() {
-
   try {
-
     const {
       state,
       saveCreds
     } = await useMultiFileAuthState("./session");
 
     sock = makeWASocket({
-
       auth: state,
+
+      browser: Browsers.ubuntu("Chrome"),
 
       logger: P({
         level: "silent"
       }),
 
-      printQRInTerminal: false
+      printQRInTerminal: false,
 
+      generateHighQualityLinkPreview: false
     });
 
-    sock.ev.on(
-      "creds.update",
-      saveCreds
-    );
+    // ======================================
+    // SIMPAN CREDENTIAL
+    // ======================================
 
-    // ====================================
-    // CONNECTION
-    // ====================================
+    sock.ev.on("creds.update", saveCreds);
+
+    // ======================================
+    // CONNECTION UPDATE
+    // ======================================
 
     sock.ev.on(
       "connection.update",
-      async ({
-        connection,
-        lastDisconnect
-      }) => {
+      async (update) => {
+
+        const {
+          connection,
+          lastDisconnect
+        } = update;
+
+        // -------------------------------
+        // CONNECTING
+        // -------------------------------
 
         if (connection === "connecting") {
 
-          statusBot =
+          botStatus =
             "🟡 Menghubungkan WhatsApp...";
 
           console.log(
             "🔄 Menghubungkan WhatsApp..."
           );
 
-        }
+          // --------------------------------
+          // REQUEST PAIRING CODE
+          // --------------------------------
 
-        if (
-          connection === "connecting" &&
-          !state.creds.registered
-        ) {
+          if (
+            !state.creds.registered &&
+            !pairingRequested
+          ) {
 
-          try {
+            pairingRequested = true;
 
-            const code =
-              await sock.requestPairingCode(
-                BOT_NUMBER
+            try {
+
+              console.log(
+                "🔑 Meminta pairing code..."
               );
 
-            pairingCode = code;
+              const code =
+                await sock.requestPairingCode(
+                  BOT_NUMBER
+                );
 
-            console.log("");
-            console.log(
-              "🔑 PAIRING CODE:",
-              code
-            );
-            console.log("");
+              pairingCode = code;
 
-          } catch (error) {
+              console.log("");
+              console.log(
+                "===================================="
+              );
+              console.log(
+                "🔑 PAIRING CODE ZAZABOT"
+              );
+              console.log(
+                "📱 NOMOR:",
+                BOT_NUMBER
+              );
+              console.log(
+                "🔐 CODE:",
+                code
+              );
+              console.log(
+                "===================================="
+              );
+              console.log("");
 
-            console.log(
-              "❌ Gagal mendapatkan pairing code:",
-              error.message
-            );
+            } catch (error) {
 
+              pairingRequested = false;
+
+              console.log(
+                "❌ GAGAL MEMBUAT PAIRING CODE"
+              );
+
+              console.log(
+                error?.message || error
+              );
+
+            }
           }
-
         }
+
+        // -------------------------------
+        // CONNECTED
+        // -------------------------------
 
         if (connection === "open") {
 
-          statusBot =
-            "🟢 WhatsApp Terhubung";
+          botStatus =
+            "🟢 WhatsApp TERHUBUNG";
 
           pairingCode =
             "SUDAH TERHUBUNG";
 
           console.log("");
           console.log(
-            "================================"
+            "===================================="
           );
           console.log(
             "✅ ZAZABOT WHATSAPP TERHUBUNG"
           );
           console.log(
-            "================================"
+            "📱 NOMOR:",
+            BOT_NUMBER
+          );
+          console.log(
+            "===================================="
           );
           console.log("");
 
         }
 
+        // -------------------------------
+        // DISCONNECTED
+        // -------------------------------
+
         if (connection === "close") {
 
-          statusBot =
+          botStatus =
             "🔴 WhatsApp Terputus";
 
-          const statusCode =
-            lastDisconnect?.error?.output?.statusCode;
+          pairingRequested = false;
 
-          const shouldReconnect =
-            statusCode !== DisconnectReason.loggedOut;
+          const statusCode =
+            lastDisconnect
+              ?.error
+              ?.output
+              ?.statusCode;
+
+          console.log("");
+          console.log(
+            "❌ WhatsApp terputus"
+          );
 
           console.log(
-            "❌ WhatsApp terputus:",
+            "Status:",
             statusCode
           );
 
+          const shouldReconnect =
+            statusCode !==
+            DisconnectReason.loggedOut;
+
           if (shouldReconnect) {
 
-            statusBot =
+            botStatus =
               "🔄 Menghubungkan kembali...";
 
+            console.log(
+              "🔄 Mencoba terhubung kembali..."
+            );
+
             setTimeout(() => {
-
               startBot();
-
             }, 5000);
 
           } else {
+
+            botStatus =
+              "🔴 Logout dari WhatsApp";
+
+            pairingCode =
+              "LOGIN ULANG DIPERLUKAN";
 
             console.log(
               "⚠️ WhatsApp logout."
             );
 
           }
-
         }
-
       }
     );
 
-    // ====================================
+    // ======================================
     // PESAN MASUK
-    // ====================================
+    // ======================================
 
     sock.ev.on(
       "messages.upsert",
@@ -372,24 +379,24 @@ async function startBot() {
 
         try {
 
-          const msg = messages[0];
+          const msg = messages?.[0];
 
           if (!msg) return;
 
           if (!msg.message) return;
 
-          if (msg.key.fromMe) return;
+          if (msg.key?.fromMe) return;
 
           const jid =
-            msg.key.remoteJid;
+            msg.key?.remoteJid;
 
           if (!jid) return;
 
           const text =
-            msg.message.conversation ||
-            msg.message.extendedTextMessage?.text ||
-            msg.message.imageMessage?.caption ||
-            msg.message.videoMessage?.caption ||
+            msg.message?.conversation ||
+            msg.message?.extendedTextMessage?.text ||
+            msg.message?.imageMessage?.caption ||
+            msg.message?.videoMessage?.caption ||
             "";
 
           if (!text) return;
@@ -397,18 +404,23 @@ async function startBot() {
           if (!text.startsWith(PREFIX))
             return;
 
-          const args =
+          const commandText =
             text
               .slice(PREFIX.length)
-              .trim()
-              .split(/\s+/);
+              .trim();
+
+          if (!commandText)
+            return;
+
+          const args =
+            commandText.split(/\s+/);
 
           const command =
             args.shift()?.toLowerCase();
 
-          // ==============================
-          // PING
-          // ==============================
+          // ==================================
+          // .PING
+          // ==================================
 
           if (command === "ping") {
 
@@ -419,17 +431,17 @@ async function startBot() {
 `🏓 PONG!
 
 🤖 ${BOT_NAME}
-✅ Bot aktif
-📱 ${BOT_NUMBER}`
+🟢 Status: Aktif
+📱 Bot: ${BOT_NUMBER}`
               }
             );
 
             return;
           }
 
-          // ==============================
-          // OWNER
-          // ==============================
+          // ==================================
+          // .OWNER
+          // ==================================
 
           if (command === "owner") {
 
@@ -439,21 +451,22 @@ async function startBot() {
                 text:
 `👑 OWNER ${BOT_NAME}
 
-📱 https://wa.me/${OWNER_NUMBER}`
+📱 Nomor Owner:
+https://wa.me/${OWNER_NUMBER}`
               }
             );
 
             return;
           }
 
-          // ==============================
-          // RUNTIME
-          // ==============================
+          // ==================================
+          // .RUNTIME
+          // ==================================
 
           if (command === "runtime") {
 
             const uptime =
-              process.uptime();
+              Math.floor(process.uptime());
 
             const days =
               Math.floor(
@@ -471,29 +484,27 @@ async function startBot() {
               );
 
             const seconds =
-              Math.floor(
-                uptime % 60
-              );
+              uptime % 60;
 
             await sock.sendMessage(
               jid,
               {
                 text:
-`⏱️ RUNTIME ${BOT_NAME}
+`⏱️ RUNTIME ZAZABOT
 
-${days} Hari
-${hours} Jam
-${minutes} Menit
-${seconds} Detik`
+📅 ${days} Hari
+⏰ ${hours} Jam
+⏱️ ${minutes} Menit
+⏲️ ${seconds} Detik`
               }
             );
 
             return;
           }
 
-          // ==============================
-          // MENU
-          // ==============================
+          // ==================================
+          // .MENU
+          // ==================================
 
           if (
             command === "menu" ||
@@ -516,6 +527,7 @@ ${seconds} Detik`
 ┃ • .bard
 ┃ • .nexara
 ┃ • .aiimage
+┃ • .jadianime
 ┃
 ┃ 🎮 GAME
 ┃ • .akinator
@@ -525,6 +537,9 @@ ${seconds} Detik`
 ┃ • .math
 ┃ • .truth
 ┃ • .dare
+┃ • .susunkata
+┃ • .tebakgambar
+┃ • .tebakkata
 ┃
 ┃ 🎲 RANDOM
 ┃ • .alay
@@ -534,6 +549,8 @@ ${seconds} Detik`
 ┃ • .pantun
 ┃ • .puisi
 ┃ • .quotesanime
+┃ • .randomanime
+┃ • .randommeme
 ┃
 ┃ 🔍 SEARCH
 ┃ • .google
@@ -542,6 +559,7 @@ ${seconds} Detik`
 ┃ • .ytsearch
 ┃ • .lirik
 ┃ • .play
+┃ • .pinterest
 ┃
 ┃ 🎨 STICKER
 ┃ • .sticker
@@ -549,14 +567,16 @@ ${seconds} Detik`
 ┃ • .ttp
 ┃ • .toimg
 ┃ • .brat
+┃ • .stickerly
 ┃
 ┃ 🛠️ TOOLS
 ┃ • .qrcode
 ┃ • .translate
 ┃ • .tts
+┃ • .ocr
 ┃ • .tourl
 ┃ • .tomp3
-┃ • .ocr
+┃ • .shortlink
 ┃
 ┃ 📥 DOWNLOAD
 ┃ • .tiktoknowm
@@ -564,6 +584,7 @@ ${seconds} Detik`
 ┃ • .igdl
 ┃ • .igreel
 ┃ • .facebook
+┃ • .mediafire
 ┃ • .ytmp3
 ┃ • .ytmp4
 ┃
@@ -576,6 +597,7 @@ ${seconds} Detik`
 ┃ • .groupinfo
 ┃ • .linkgc
 ┃ • .antilink
+┃ • .welcome
 ┃
 ┃ ℹ️ INFO
 ┃ • .profile
@@ -583,6 +605,7 @@ ${seconds} Detik`
 ┃ • .limit
 ┃ • .level
 ┃ • .status
+┃ • .cekpremium
 ┃
 ╰━━━━━━━━━━━━━━━━━━╯
 
@@ -598,50 +621,61 @@ ${seconds} Detik`
             return;
           }
 
-          // ==============================
-          // COMMAND TIDAK DIKENAL
-          // ==============================
+          // ==================================
+          // COMMAND BELUM DIBUAT
+          // ==================================
 
           await sock.sendMessage(
             jid,
             {
               text:
-`❌ Command tidak tersedia.
+`❌ Command belum tersedia.
 
-Ketik ${PREFIX}menu untuk melihat menu.`
+Ketik:
+.menu
+
+untuk melihat command ZazaBot.`
             }
           );
 
         } catch (error) {
 
           console.log(
-            "MESSAGE ERROR:",
-            error
+            "❌ MESSAGE ERROR:",
+            error?.message || error
           );
 
         }
-
       }
     );
 
   } catch (error) {
 
+    console.log("");
     console.log(
-      "START BOT ERROR:",
-      error
+      "❌ START BOT ERROR"
     );
-
-    setTimeout(
-      startBot,
-      5000
+    console.log(
+      error?.message || error
     );
+    console.log("");
 
+    setTimeout(() => {
+      startBot();
+    }, 5000);
   }
-
 }
 
-// ========================================
-// JALANKAN BOT
-// ========================================
+// ==========================================
+// JALANKAN ZAZABOT
+// ==========================================
+
+console.log("");
+console.log("====================================");
+console.log("🤖 ZAZABOT STARTING...");
+console.log("📱 BOT:", BOT_NUMBER);
+console.log("👑 OWNER:", OWNER_NUMBER);
+console.log("====================================");
+console.log("");
 
 startBot();
