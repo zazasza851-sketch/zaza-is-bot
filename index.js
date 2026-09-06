@@ -6245,6 +6245,28 @@ setInterval(
 // ==========================================
 
 testDatabase();
+function giveMessageXP(jid) {
+  try {
+    const user = getUser(jid);
+    if (!user) return;
+
+    user.xp = Number(user.xp || 0) + 1;
+    user.level =
+      Math.floor(Math.sqrt(user.xp / 10)) + 1;
+
+  } catch (error) {
+    console.log("XP error:", error.message);
+  }
+}
+
+async function runSecurityChecks(message, text) {
+  try {
+    return false;
+  } catch (error) {
+    console.log("Security check error:", error.message);
+    return false;
+  }
+}
 
 console.log("✅ Part 7 berhasil dimuat.");
 // ==========================================
