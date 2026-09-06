@@ -1,5 +1,5 @@
 {
-  "name": "zazaszabot",
+  "name": "zazasabot",
   "version": "1.0.0",
   "description": "WhatsApp Bot ZazaBot",
   "main": "index.js",
@@ -10,8 +10,8 @@
   "dependencies": {
     "@whiskeysockets/baileys": "latest",
     "pino": "latest",
-    "qrcode-terminal": "latest"
-"wa-sticker-formatter": "^4.4.4",
-"sharp": "^0.35.4"
+    "qrcode": "^1.5.4",
+    "wa-sticker-formatter": "^4.4.4",
+    "sharp": "^0.35.4"
   }
 }
