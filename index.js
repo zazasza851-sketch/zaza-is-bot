@@ -1,146 +1,144 @@
-// ==========================================
-// ZAZABOT - FULL INDEX.JS
-// WhatsApp Bot - Baileys
-// ==========================================
+// =====================================================
+// ZAZABOT - WHATSAPP BOT
+// PART 1 - BASIC / CONFIG / DATABASE / HELPERS
+// =====================================================
 
 import makeWASocket, {
   useMultiFileAuthState,
   DisconnectReason,
-  Browsers,
-  downloadContentFromMessage
+  Browsers
 } from "@whiskeysockets/baileys";
 
 import pino from "pino";
-import QRCode from "qrcode";
-import sharp from "sharp";
 import fs from "fs";
+import path from "path";
 import http from "http";
+import QRCode from "qrcode";
 
-// ==========================================
+// =====================================================
 // CONFIG
-// ==========================================
+// =====================================================
 
 const BOT_NAME = "ZazaBot";
+const PREFIX = ".";
+const OWNER_NUMBER = "6289630747010";
 
-const OWNER_NUMBER = (
-  process.env.OWNER_NUMBER || "6289630747010"
-).replace(/\D/g, "");
-
-const PREFIX = process.env.PREFIX || ".";
-
-const PORT = Number(
-  process.env.PORT || 8080
-);
-
-const DB_FILE = "./database.json";
+const PORT = process.env.PORT || 8080;
 
 const SESSION_DIR = "./session";
+const DATABASE_FILE = "./database.json";
+
+// =====================================================
+// GLOBAL
+// =====================================================
 
 let sock = null;
-
-let qrImage = "";
-
-let connectionStatus = "STARTING";
+let qrCode = null;
+let publicMode = true;
+let startedAt = Date.now();
+let connectionStatus = "starting";
 
 let reconnectTimer = null;
 
-let publicMode = true;
+// =====================================================
+// DATABASE DEFAULT
+// =====================================================
 
-const startedAt = Date.now();
+const defaultDB = {
+  settings: {
+    owner: OWNER_NUMBER,
+    botName: BOT_NAME
+  },
 
-// ==========================================
-// DATABASE
-// ==========================================
+  users: {},
 
-function defaultDB() {
-  return {
-    settings: {
-      owner: OWNER_NUMBER,
-      public: true
-    },
+  groups: {},
 
-    users: {},
+  banned: [],
 
-    groups: {},
+  premium: {},
 
-    banned: [],
+  stats: {
+    messages: 0,
+    commands: 0
+  }
+};
 
-    orders: {},
+let db = defaultDB;
 
-    premium: {},
-
-    stats: {
-      messages: 0,
-      commands: 0
-    }
-  };
-}
+// =====================================================
+// DATABASE LOAD
+// =====================================================
 
 function loadDB() {
   try {
-    if (!fs.existsSync(DB_FILE)) {
-      const data = defaultDB();
-
-      fs.writeFileSync(
-        DB_FILE,
-        JSON.stringify(data, null, 2)
-      );
-
-      return data;
+    if (!fs.existsSync(DATABASE_FILE)) {
+      db = structuredClone(defaultDB);
+      saveDB();
+      return;
     }
 
-    const data = JSON.parse(
-      fs.readFileSync(DB_FILE, "utf8")
-    );
+    const raw = fs.readFileSync(DATABASE_FILE, "utf8");
 
-    const base = defaultDB();
+    if (!raw.trim()) {
+      db = structuredClone(defaultDB);
+      saveDB();
+      return;
+    }
 
-    return {
-      ...base,
-      ...data,
+    const parsed = JSON.parse(raw);
+
+    db = {
+      ...structuredClone(defaultDB),
+      ...parsed,
 
       settings: {
-        ...base.settings,
-        ...(data.settings || {})
+        ...defaultDB.settings,
+        ...(parsed.settings || {})
       },
 
+      users: parsed.users || {},
+      groups: parsed.groups || {},
+      banned: parsed.banned || [],
+      premium: parsed.premium || {},
+
       stats: {
-        ...base.stats,
-        ...(data.stats || {})
+        ...defaultDB.stats,
+        ...(parsed.stats || {})
       }
     };
-  } catch (error) {
-    console.error(
-      "DATABASE LOAD ERROR:",
-      error.message
-    );
 
-    return defaultDB();
+  } catch (error) {
+    console.error("DATABASE LOAD ERROR:", error.message);
+
+    db = structuredClone(defaultDB);
   }
 }
 
-let db = loadDB();
-
-publicMode =
-  db.settings.public !== false;
+// =====================================================
+// DATABASE SAVE
+// =====================================================
 
 function saveDB() {
   try {
     fs.writeFileSync(
-      DB_FILE,
+      DATABASE_FILE,
       JSON.stringify(db, null, 2)
     );
   } catch (error) {
-    console.error(
-      "DATABASE SAVE ERROR:",
-      error.message
-    );
+    console.error("DATABASE SAVE ERROR:", error.message);
   }
 }
 
-// ==========================================
+// =====================================================
+// INITIALIZE
+// =====================================================
+
+loadDB();
+
+// =====================================================
 // BASIC HELPERS
-// ==========================================
+// =====================================================
 
 function jidNumber(jid = "") {
   return String(jid)
@@ -149,19 +147,25 @@ function jidNumber(jid = "") {
     .replace(/\D/g, "");
 }
 
-function userJid(number = "") {
-  const n = String(number)
-    .replace(/\D/g, "");
+// =====================================================
 
-  return n
-    ? `${n}@s.whatsapp.net`
-    : "";
+function userJid(number = "") {
+  const clean = String(number).replace(/\D/g, "");
+
+  if (!clean) {
+    return "";
+  }
+
+  return `${clean}@s.whatsapp.net`;
 }
+
+// =====================================================
 
 function isGroup(jid = "") {
-  return String(jid)
-    .endsWith("@g.us");
+  return String(jid).endsWith("@g.us");
 }
+
+// =====================================================
 
 function getSender(message) {
   return (
@@ -171,6 +175,8 @@ function getSender(message) {
   );
 }
 
+// =====================================================
+
 function getChat(message) {
   return (
     message?.key?.remoteJid ||
@@ -178,29 +184,37 @@ function getChat(message) {
   );
 }
 
+// =====================================================
+
 function isOwner(jid = "") {
   const number = jidNumber(jid);
 
   const owners = [
     OWNER_NUMBER,
-    jidNumber(
-      db?.settings?.owner || ""
-    )
-  ].filter(Boolean);
+    db.settings?.owner || ""
+  ]
+    .map(jidNumber)
+    .filter(Boolean);
 
   return owners.includes(number);
 }
 
-function isBanned(jid = "") {
-  return db.banned.includes(
-    jidNumber(jid)
-  );
-}
+// =====================================================
 
-function getUser(jid) {
+function isBanned(jid = "") {
   const number = jidNumber(jid);
 
-  if (!number) return null;
+  return db.banned.includes(number);
+}
+
+// =====================================================
+
+function getUser(jid = "") {
+  const number = jidNumber(jid);
+
+  if (!number) {
+    return null;
+  }
 
   if (!db.users[number]) {
     db.users[number] = {
@@ -215,12 +229,16 @@ function getUser(jid) {
       afk: null,
       createdAt: Date.now()
     };
+
+    saveDB();
   }
 
   return db.users[number];
 }
 
-function getGroup(jid) {
+// =====================================================
+
+function getGroup(jid = "") {
   if (!db.groups[jid]) {
     db.groups[jid] = {
       welcome: false,
@@ -233,6 +251,7 @@ function getGroup(jid) {
       antibadwordKick: true,
 
       antibot: false,
+
       antidelete: false,
       antimentionsw: false,
       antiviewonce: false,
@@ -252,15 +271,21 @@ function getGroup(jid) {
 
       reminders: []
     };
+
+    saveDB();
   }
 
   return db.groups[jid];
 }
 
-function isPremium(jid) {
+// =====================================================
+
+function isPremium(jid = "") {
   const user = getUser(jid);
 
-  if (!user) return false;
+  if (!user) {
+    return false;
+  }
 
   if (
     user.premiumUntil &&
@@ -282,554 +307,209 @@ function isPremium(jid) {
   return Boolean(user.premium);
 }
 
+// =====================================================
+
 function formatRupiah(amount = 0) {
-  return (
-    "Rp" +
+  return "Rp" +
     Number(amount || 0)
-      .toLocaleString("id-ID")
-  );
+      .toLocaleString("id-ID");
 }
 
-function formatRuntime(ms) {
-  let seconds =
-    Math.floor(ms / 1000);
+// =====================================================
 
-  const days =
-    Math.floor(seconds / 86400);
+function formatRuntime(ms = 0) {
+  let seconds = Math.floor(ms / 1000);
 
+  const days = Math.floor(seconds / 86400);
   seconds %= 86400;
 
-  const hours =
-    Math.floor(seconds / 3600);
-
+  const hours = Math.floor(seconds / 3600);
   seconds %= 3600;
 
-  const minutes =
-    Math.floor(seconds / 60);
-
+  const minutes = Math.floor(seconds / 60);
   seconds %= 60;
 
   return `${days}d ${hours}h ${minutes}m ${seconds}s`;
 }
 
-function randomId(prefix = "ORD") {
-  return (
-    `${prefix}-` +
-    `${Date.now()}-` +
-    `${Math.random()
-      .toString(36)
-      .slice(2, 7)
-      .toUpperCase()}`
-  );
-}
-
-function cleanText(text = "") {
-  return String(text).trim();
-}
-
-function extractUrl(text = "") {
-  const match =
-    String(text).match(
-      /https?:\/\/[^\s]+/i
-    );
-
-  return match
-    ? match[0]
-    : null;
-}
-
-function parseDuration(text = "") {
-  const match =
-    String(text).match(
-      /(\d+)\s*(d|day|hari|h|m|menit|month|bulan)/i
-    );
-
-  if (!match) return null;
-
-  const number =
-    Number(match[1]);
-
-  const unit =
-    match[2].toLowerCase();
-
-  if (
-    ["d", "day", "hari"]
-      .includes(unit)
-  ) {
-    return (
-      number *
-      24 *
-      60 *
-      60 *
-      1000
-    );
-  }
-
-  if (
-    ["m", "menit"]
-      .includes(unit)
-  ) {
-    return (
-      number *
-      60 *
-      1000
-    );
-  }
-
-  if (
-    ["month", "bulan"]
-      .includes(unit)
-  ) {
-    return (
-      number *
-      30 *
-      24 *
-      60 *
-      60 *
-      1000
-    );
-  }
-
-  return null;
-}
-
-// ==========================================
-// MESSAGE HELPERS
-// ==========================================
+// =====================================================
+// GET MESSAGE TEXT
+// =====================================================
 
 function getMessageText(message) {
-  if (!message) return "";
+  const msg = message?.message;
+
+  if (!msg) {
+    return "";
+  }
 
   return (
-    message.conversation ||
-
-    message.extendedTextMessage
-      ?.text ||
-
-    message.imageMessage
-      ?.caption ||
-
-    message.videoMessage
-      ?.caption ||
-
-    message.documentMessage
-      ?.caption ||
-
-    message.buttonsResponseMessage
-      ?.selectedButtonId ||
-
-    message.listResponseMessage
-      ?.singleSelectReply
-      ?.selectedRowId ||
-
-    message.templateButtonReplyMessage
-      ?.selectedId ||
-
+    msg.conversation ||
+    msg.extendedTextMessage?.text ||
+    msg.imageMessage?.caption ||
+    msg.videoMessage?.caption ||
+    msg.documentMessage?.caption ||
+    msg.buttonsResponseMessage?.selectedButtonId ||
+    msg.listResponseMessage?.singleSelectReply?.selectedRowId ||
     ""
   );
 }
 
-function getQuotedMessage(message) {
-  return (
-    message
-      ?.extendedTextMessage
-      ?.contextInfo
-      ?.quotedMessage ||
-    null
-  );
-}
-
-function getQuotedParticipant(message) {
-  return (
-    message
-      ?.extendedTextMessage
-      ?.contextInfo
-      ?.participant ||
-    null
-  );
-}
+// =====================================================
+// SEND TEXT
+// =====================================================
 
 async function sendText(
-  jid,
+  chat,
   text,
   options = {}
 ) {
-  if (!sock) return;
+  if (!sock || !chat) {
+    return;
+  }
 
-  return sock.sendMessage(
-    jid,
-    {
-      text: String(text),
-      ...options
-    }
-  );
+  try {
+    return await sock.sendMessage(
+      chat,
+      {
+        text: String(text),
+        ...options
+      }
+    );
+  } catch (error) {
+    console.error(
+      "SEND TEXT ERROR:",
+      error.message
+    );
+  }
 }
 
+// =====================================================
+// REACT
+// =====================================================
+
 async function react(
-  jid,
-  key,
+  message,
   emoji = "✅"
 ) {
+  if (!sock) {
+    return;
+  }
+
   try {
     await sock.sendMessage(
-      jid,
+      getChat(message),
       {
         react: {
           text: emoji,
-          key
+          key: message.key
         }
       }
     );
-  } catch {}
+  } catch {
+    // ignore reaction errors
+  }
 }
 
-async function downloadMedia(
-  message,
-  type
-) {
-  const stream =
-    await downloadContentFromMessage(
-      message,
-      type
-    );
+// =====================================================
+// RANDOM ID
+// =====================================================
 
-  const chunks = [];
+function randomId(length = 8) {
+  const chars =
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
 
-  for await (
-    const chunk of stream
-  ) {
-    chunks.push(chunk);
+  let result = "";
+
+  for (let i = 0; i < length; i++) {
+    result += chars[
+      Math.floor(Math.random() * chars.length)
+    ];
   }
-
-  return Buffer.concat(chunks);
-}
-
-async function getImageBuffer(
-  message,
-  quoted = false
-) {
-  let target = message;
-
-  if (quoted) {
-    target =
-      getQuotedMessage(message);
-  }
-
-  if (
-    !target?.imageMessage
-  ) {
-    return null;
-  }
-
-  return downloadMedia(
-    target.imageMessage,
-    "image"
-  );
-}
-// ==========================================
-// STORE DATA
-// ==========================================
-
-const PRODUCTS = {
-  spotify: [
-    {
-      name: "Spotify Premium",
-      duration: "1 Bulan",
-      price: 8000
-    },
-    {
-      name: "Spotify Premium",
-      duration: "2 Bulan",
-      price: 10000
-    }
-  ],
-
-  netflix: [
-    {
-      name: "Netflix Premium",
-      duration: "1 Bulan",
-      price: 8000
-    },
-    {
-      name: "Netflix Premium",
-      duration: "2 Bulan",
-      price: 10000
-    }
-  ],
-
-  hoki: [
-    {
-      name: "Waktu Hoki-Hokian",
-      duration: "Paket",
-      price: 15000
-    }
-  ],
-
-  ebook: [
-    {
-      name: "E-book Belajar Bahasa Inggris",
-      duration: "Paket",
-      price: 7000
-    },
-    {
-      name: "E-book The Psychology of Money",
-      duration: "Paket",
-      price: 7000
-    }
-  ]
-};
-
-function productList() {
-  let result =
-    "🛍️ *ZAZA STORE*\n\n";
-
-  for (
-    const [category, products]
-    of Object.entries(PRODUCTS)
-  ) {
-    result +=
-      `📦 *${category.toUpperCase()}*\n`;
-
-    for (const product of products) {
-      result +=
-        `• ${product.name}\n` +
-        `  └ ${product.duration} — ` +
-        `${formatRupiah(product.price)}\n`;
-    }
-
-    result += "\n";
-  }
-
-  result +=
-    "💳 *Pembayaran*\n" +
-    "QRIS / DANA / BANK\n\n" +
-    `📌 Ketik ${PREFIX}order ` +
-    `nama produk untuk membuat order.`;
 
   return result;
 }
 
-function findProduct(query = "") {
-  const search =
-    query.toLowerCase().trim();
+// =====================================================
+// URL EXTRACTOR
+// =====================================================
 
-  if (!search) return null;
+function extractUrl(text = "") {
+  const match = String(text).match(
+    /https?:\/\/[^\s]+/i
+  );
 
-  for (
-    const [category, products]
-    of Object.entries(PRODUCTS)
-  ) {
-    for (const product of products) {
-      const combined =
-        `${category} ` +
-        `${product.name} ` +
-        `${product.duration}`
-          .toLowerCase();
+  return match ? match[0] : null;
+}
 
-      if (
-        combined.includes(search) ||
-        search.includes(
-          category.toLowerCase()
-        )
-      ) {
-        return {
-          category,
-          ...product
-        };
-      }
-    }
+// =====================================================
+// DURATION
+// =====================================================
+
+function parseDuration(input = "") {
+  const value = String(input)
+    .trim()
+    .toLowerCase();
+
+  const match = value.match(
+    /^(\d+)\s*(s|m|h|d|w)$/
+  );
+
+  if (!match) {
+    return null;
   }
 
-  return null;
+  const number = Number(match[1]);
+  const unit = match[2];
+
+  const multipliers = {
+    s: 1000,
+    m: 60 * 1000,
+    h: 60 * 60 * 1000,
+    d: 24 * 60 * 60 * 1000,
+    w: 7 * 24 * 60 * 60 * 1000
+  };
+
+  return number * multipliers[unit];
 }
 
-// ==========================================
-// MENU
-// ==========================================
+// =====================================================
+// TARGET USER
+// =====================================================
 
-function menuText(sender) {
-  const status =
-    isPremium(sender)
-      ? "💎 Premium"
-      : "🆓 Free";
+function targetFromMessage(message, args = []) {
+  const mentioned =
+    message?.message
+      ?.extendedTextMessage
+      ?.contextInfo
+      ?.mentionedJid;
 
-  return `
-╭━━━〔 🤖 ZAZABOT 〕━━━╮
-┃ 👤 Status : ${status}
-┃ ⚡ Prefix : ${PREFIX}
-┃ 📡 Mode   : ${publicMode ? "Public" : "Self"}
-╰━━━━━━━━━━━━━━━━━━━━━━╯
+  if (mentioned?.length) {
+    return mentioned[0];
+  }
 
-👑 *OWNER*
-${PREFIX}owner
-${PREFIX}setowner
-${PREFIX}public
-${PREFIX}self
-${PREFIX}bc
-${PREFIX}ban
-${PREFIX}unban
-${PREFIX}listban
-${PREFIX}addbalance
-${PREFIX}addlimit
-${PREFIX}restart
+  const number = String(args[0] || "")
+    .replace(/\D/g, "");
 
-📚 *GENERAL*
-${PREFIX}menu
-${PREFIX}help
-${PREFIX}ping
-${PREFIX}runtime
-${PREFIX}speed
-${PREFIX}botinfo
-${PREFIX}profile
-${PREFIX}rules
-${PREFIX}donate
+  if (number) {
+    return userJid(number);
+  }
 
-🤖 *AI*
-${PREFIX}ai
-${PREFIX}openai
-${PREFIX}ask
-${PREFIX}translate
-${PREFIX}bard
-${PREFIX}nexara
-${PREFIX}aiimage
-
-🎮 *GAME*
-${PREFIX}akinator
-${PREFIX}asahotak
-${PREFIX}caklontong
-${PREFIX}family100
-${PREFIX}math
-${PREFIX}truth
-${PREFIX}dare
-${PREFIX}tebak
-${PREFIX}tebakkata
-${PREFIX}tebakgambar
-${PREFIX}susunkata
-${PREFIX}stopgame
-
-🎨 *STICKER*
-${PREFIX}sticker
-${PREFIX}s
-${PREFIX}brat
-${PREFIX}attp
-${PREFIX}ttp
-${PREFIX}toimg
-
-🔎 *SEARCH*
-${PREFIX}google
-${PREFIX}googleimage
-${PREFIX}wikipedia
-${PREFIX}ytsearch
-${PREFIX}lirik
-
-📥 *DOWNLOAD*
-${PREFIX}tiktok
-${PREFIX}tiktoknowm
-${PREFIX}tiktokwm
-${PREFIX}igdl
-${PREFIX}igreel
-${PREFIX}instagram
-${PREFIX}facebook
-${PREFIX}ytmp3
-${PREFIX}ytmp4
-
-👥 *GROUP*
-${PREFIX}absen
-${PREFIX}add
-${PREFIX}kick
-${PREFIX}promote
-${PREFIX}demote
-${PREFIX}tagall
-${PREFIX}hidetag
-${PREFIX}groupinfo
-${PREFIX}cekidgroup
-${PREFIX}linkgroup
-${PREFIX}setname
-${PREFIX}setdesc
-${PREFIX}welcome
-${PREFIX}welcomeoff
-${PREFIX}goodbye
-${PREFIX}goodbyeoff
-
-🛡️ *SECURITY*
-${PREFIX}antilink
-${PREFIX}antilinkoff
-${PREFIX}antilinknokick
-${PREFIX}antibadword
-${PREFIX}antibadwordnokick
-${PREFIX}antibot
-${PREFIX}antidelete
-${PREFIX}antimentionsw
-${PREFIX}antiviewonce
-${PREFIX}antiwame
-${PREFIX}antiwamenokick
-${PREFIX}antiluar
-
-⚠️ *WARN*
-${PREFIX}warn
-${PREFIX}unwarn
-${PREFIX}cekwarn
-${PREFIX}listwarn
-${PREFIX}resetwarn
-${PREFIX}tagadmin
-${PREFIX}listadmin
-
-📝 *LIST & REMINDER*
-${PREFIX}addlist
-${PREFIX}updatelist
-${PREFIX}uplist
-${PREFIX}addpoin
-${PREFIX}addreminder
-${PREFIX}addalarm
-${PREFIX}addbadword
-${PREFIX}afk
-
-📅 *SCHEDULE*
-${PREFIX}createschedulecall
-${PREFIX}cekabsen
-${PREFIX}cekpoint
-${PREFIX}cekschedule
-
-🛒 *ZAZA STORE*
-${PREFIX}produk
-${PREFIX}pricelist
-${PREFIX}saldo
-${PREFIX}balance
-${PREFIX}topup
-${PREFIX}order
-${PREFIX}buy
-${PREFIX}beli
-${PREFIX}cekorder
-${PREFIX}orderstatus
-${PREFIX}premium
-${PREFIX}cekpremium
-
-🧰 *TOOLS*
-${PREFIX}qr
-${PREFIX}shortlink
-${PREFIX}ss
-${PREFIX}tourl
-${PREFIX}removebg
-${PREFIX}ocr
-
-ℹ️ *INFO*
-${PREFIX}ceksewa
-${PREFIX}ceksewabyid
-${PREFIX}cekowner
-${PREFIX}dbinfo
-
-━━━━━━━━━━━━━━━━━━━━━━
-💙 *ZAZA STORE*
-`.trim();
+  return getSender(message);
 }
 
-// ==========================================
-// COMMAND PERMISSION HELPERS
-// ==========================================
+// =====================================================
+// BASIC PERMISSION
+// =====================================================
 
-function needOwner(sender, reply) {
+async function needOwner(
+  message
+) {
+  const sender = getSender(message);
+
   if (!isOwner(sender)) {
-    reply(
+    await sendText(
+      getChat(message),
       "❌ Perintah ini khusus owner."
     );
 
@@ -839,10 +519,17 @@ function needOwner(sender, reply) {
   return true;
 }
 
-function needGroup(chat, reply) {
+// =====================================================
+
+async function needGroup(
+  message
+) {
+  const chat = getChat(message);
+
   if (!isGroup(chat)) {
-    reply(
-      "❌ Perintah ini hanya bisa digunakan di grup."
+    await sendText(
+      chat,
+      "❌ Perintah ini hanya dapat digunakan di grup."
     );
 
     return false;
@@ -851,69 +538,78 @@ function needGroup(chat, reply) {
   return true;
 }
 
-async function getGroupMetadata(chat) {
+// =====================================================
+// GROUP ADMIN
+// =====================================================
+
+async function getGroupMetadata(jid) {
+  if (!sock) {
+    return null;
+  }
+
   try {
-    return await sock.groupMetadata(chat);
-  } catch {
+    return await sock.groupMetadata(jid);
+  } catch (error) {
+    console.error(
+      "GROUP METADATA ERROR:",
+      error.message
+    );
+
     return null;
   }
 }
 
-async function isBotAdmin(chat) {
+// =====================================================
+
+async function isGroupAdmin(
+  jid,
+  userJidValue
+) {
   const metadata =
-    await getGroupMetadata(chat);
+    await getGroupMetadata(jid);
 
-  if (!metadata) return false;
-
-  const botNumber =
-    jidNumber(sock.user?.id || "");
+  if (!metadata) {
+    return false;
+  }
 
   const participant =
-    metadata.participants.find(
-      p => jidNumber(p.id) === botNumber
+    metadata.participants?.find(
+      p => p.id === userJidValue
     );
 
-  return (
-    participant?.admin === "admin" ||
-    participant?.admin === "superadmin"
+  return Boolean(
+    participant &&
+    (
+      participant.admin === "admin" ||
+      participant.admin === "superadmin"
+    )
   );
 }
 
-async function isAdmin(
-  chat,
-  sender
-) {
-  const metadata =
-    await getGroupMetadata(chat);
+// =====================================================
 
-  if (!metadata) return false;
+async function needAdmin(message) {
+  if (!(await needGroup(message))) {
+    return false;
+  }
 
-  const participant =
-    metadata.participants.find(
-      p =>
-        jidNumber(p.id) ===
-        jidNumber(sender)
-    );
+  const chat = getChat(message);
+  const sender = getSender(message);
 
-  return (
-    participant?.admin === "admin" ||
-    participant?.admin === "superadmin"
-  );
-}
+  if (isOwner(sender)) {
+    return true;
+  }
 
-async function needAdmin(
-  chat,
-  sender,
-  reply
-) {
-  if (
-    !await isAdmin(
+  const admin =
+    await isGroupAdmin(
       chat,
       sender
-    )
-  ) {
-    reply(
-      "❌ Perintah ini khusus admin grup."
+    );
+
+  if (!admin) {
+    await sendText(
+      chat,
+      "❌ Perintah ini hanya untuk admin grup."
     );
 
     return false;
@@ -922,15 +618,41 @@ async function needAdmin(
   return true;
 }
 
-async function needBotAdmin(
-  chat,
-  reply
-) {
-  if (
-    !await isBotAdmin(chat)
-  ) {
-    reply(
-      "❌ Jadikan bot sebagai admin terlebih dahulu."
+// =====================================================
+// BOT ADMIN
+// =====================================================
+
+async function isBotAdmin(jid) {
+  if (!sock) {
+    return false;
+  }
+
+  try {
+    const botJid =
+      sock.user?.id;
+
+    return await isGroupAdmin(
+      jid,
+      botJid
+    );
+  } catch {
+    return false;
+  }
+}
+
+// =====================================================
+
+async function needBotAdmin(message) {
+  const chat = getChat(message);
+
+  if (!(await needGroup(message))) {
+    return false;
+  }
+
+  if (!(await isBotAdmin(chat))) {
+    await sendText(
+      chat,
+      "❌ Bot harus menjadi admin grup terlebih dahulu."
     );
 
     return false;
@@ -939,367 +661,609 @@ async function needBotAdmin(
   return true;
 }
 
-// ==========================================
-// TARGET USER
-// ==========================================
+// =====================================================
+// MENU
+// =====================================================
 
-function targetFromMessage(
-  message,
-  args = []
-) {
-  const mentioned =
-    message
-      ?.message
-      ?.extendedTextMessage
-      ?.contextInfo
-      ?.mentionedJid || [];
+const menuText = `
+╭━━━〔 ${BOT_NAME} 〕━━━╮
+┃
+┃ 👋 Halo!
+┃
+┃ Prefix : ${PREFIX}
+┃
+┣━━〔 GENERAL 〕
+┃ ${PREFIX}menu
+┃ ${PREFIX}ping
+┃ ${PREFIX}runtime
+┃ ${PREFIX}botinfo
+┃ ${PREFIX}profile
+┃ ${PREFIX}rules
+┃
+┣━━〔 OWNER 〕
+┃ ${PREFIX}owner
+┃ ${PREFIX}setowner
+┃ ${PREFIX}public
+┃ ${PREFIX}self
+┃ ${PREFIX}ban
+┃ ${PREFIX}unban
+┃ ${PREFIX}listban
+┃ ${PREFIX}bc
+┃
+┣━━〔 STORE 〕
+┃ ${PREFIX}produk
+┃ ${PREFIX}saldo
+┃ ${PREFIX}topup
+┃ ${PREFIX}order
+┃ ${PREFIX}cekorder
+┃ ${PREFIX}premium
+┃ ${PREFIX}cekpremium
+┃
+┣━━〔 AI 〕
+┃ ${PREFIX}ai
+┃ ${PREFIX}translate
+┃ ${PREFIX}aiimage
+┃
+┣━━〔 SEARCH 〕
+┃ ${PREFIX}google
+┃ ${PREFIX}googleimage
+┃ ${PREFIX}wikipedia
+┃ ${PREFIX}ytsearch
+┃ ${PREFIX}lirik
+┃
+┣━━〔 DOWNLOAD 〕
+┃ ${PREFIX}tiktok
+┃ ${PREFIX}tiktoknowm
+┃ ${PREFIX}tiktokwm
+┃ ${PREFIX}igdl
+┃ ${PREFIX}igreel
+┃ ${PREFIX}facebook
+┃ ${PREFIX}ytmp3
+┃ ${PREFIX}ytmp4
+┃
+┣━━〔 STICKER 〕
+┃ ${PREFIX}sticker
+┃ ${PREFIX}s
+┃ ${PREFIX}brat
+┃ ${PREFIX}ttp
+┃ ${PREFIX}attp
+┃ ${PREFIX}toimg
+┃
+┣━━〔 TOOLS 〕
+┃ ${PREFIX}qr
+┃ ${PREFIX}shortlink
+┃ ${PREFIX}tourl
+┃ ${PREFIX}ocr
+┃
+┣━━〔 GROUP 〕
+┃ ${PREFIX}groupinfo
+┃ ${PREFIX}cekidgroup
+┃ ${PREFIX}linkgroup
+┃ ${PREFIX}listadmin
+┃ ${PREFIX}tagadmin
+┃ ${PREFIX}tagall
+┃ ${PREFIX}hidetag
+┃ ${PREFIX}add
+┃ ${PREFIX}kick
+┃ ${PREFIX}promote
+┃ ${PREFIX}demote
+┃ ${PREFIX}setname
+┃ ${PREFIX}setdesc
+┃
+┣━━〔 SECURITY 〕
+┃ ${PREFIX}antilink
+┃ ${PREFIX}antilinkoff
+┃ ${PREFIX}antilinknokick
+┃ ${PREFIX}antibadword
+┃ ${PREFIX}antibot
+┃ ${PREFIX}antidelete
+┃ ${PREFIX}antimentionsw
+┃ ${PREFIX}antiviewonce
+┃ ${PREFIX}antiwame
+┃ ${PREFIX}antiwamenokick
+┃ ${PREFIX}antiluar
+┃
+┣━━〔 GAME 〕
+┃ ${PREFIX}asahotak
+┃ ${PREFIX}tebakkata
+┃ ${PREFIX}math
+┃ ${PREFIX}truth
+┃ ${PREFIX}dare
+┃ ${PREFIX}caklontong
+┃ ${PREFIX}family100
+┃ ${PREFIX}akinator
+┃ ${PREFIX}stopgame
+┃
+╰━━━━━━━━━━━━━━━━━━╯
+`;
 
-  if (mentioned.length) {
-    return mentioned[0];
+console.log(
+  `${BOT_NAME} basic module loaded.`
+);
+// =====================================================
+// ZAZABOT - PART 2
+// PRODUCTS / GAMES / UTILITY HELPERS
+// =====================================================
+
+// =====================================================
+// PRODUCT DATABASE
+// =====================================================
+
+const products = [
+  {
+    id: "spotify1",
+    name: "Spotify Premium 1 Bulan",
+    price: 8000
+  },
+  {
+    id: "spotify2",
+    name: "Spotify Premium 2 Bulan",
+    price: 10000
+  },
+  {
+    id: "hokian",
+    name: "Waktu Hoki Hokian",
+    price: 15000
+  },
+  {
+    id: "premium7",
+    name: "Premium Bot 7 Hari",
+    price: 5000
+  },
+  {
+    id: "premium30",
+    name: "Premium Bot 30 Hari",
+    price: 15000
   }
+];
 
-  const quoted =
-    getQuotedParticipant(
-      message?.message
-    );
+// =====================================================
+// FIND PRODUCT
+// =====================================================
 
-  if (quoted) {
-    return quoted;
-  }
+function findProduct(id = "") {
+  const value = String(id)
+    .trim()
+    .toLowerCase();
 
-  const number =
-    String(args[0] || "")
-      .replace(/\D/g, "");
-
-  if (number) {
-    return userJid(number);
-  }
-
-  return null;
+  return products.find(
+    product =>
+      product.id.toLowerCase() === value ||
+      product.name.toLowerCase().includes(value)
+  );
 }
 
-// ==========================================
-// GAME DATA
-// ==========================================
+// =====================================================
+// PRODUCT LIST
+// =====================================================
+
+function productListText() {
+  let text = `
+╭━━━〔 🛒 PRODUK ZAZA STORE 〕━━━╮
+┃
+`;
+
+  for (const product of products) {
+    text +=
+      `┃ 🛍️ ${product.name}\n` +
+      `┃ ID     : ${product.id}\n` +
+      `┃ Harga  : ${formatRupiah(product.price)}\n` +
+      `┃\n`;
+  }
+
+  text += `
+┣━━━━━━━━━━━━━━━━━━
+┃ Cara order:
+┃ ${PREFIX}order <id>
+┃
+┃ Contoh:
+┃ ${PREFIX}order spotify1
+╰━━━━━━━━━━━━━━━━━━╯
+`;
+
+  return text;
+}
+
+// =====================================================
+// GAME DATABASE
+// =====================================================
 
 const riddles = [
-  [
-    "Aku punya gigi tetapi tidak bisa makan. Aku apa?",
-    "sisir"
-  ],
-  [
-    "Semakin diisi semakin ringan. Aku apa?",
-    "balon"
-  ],
-  [
-    "Aku punya kaki tetapi tidak bisa berjalan.",
-    "meja"
-  ],
-  [
-    "Aku selalu mengikuti kamu tetapi tidak pernah mendahului.",
-    "bayangan"
-  ],
-  [
-    "Aku punya wajah dan dua tangan tetapi tidak punya kaki.",
-    "jam"
-  ]
+  {
+    question: "Apa yang mempunyai kaki tetapi tidak bisa berjalan?",
+    answer: "meja"
+  },
+  {
+    question: "Apa yang semakin diisi semakin ringan?",
+    answer: "balon"
+  },
+  {
+    question: "Aku punya banyak gigi tetapi tidak bisa menggigit. Apa aku?",
+    answer: "sisir"
+  },
+  {
+    question: "Apa yang punya leher tetapi tidak punya kepala?",
+    answer: "botol"
+  },
+  {
+    question: "Apa yang selalu naik tetapi tidak pernah turun?",
+    answer: "umur"
+  }
 ];
+
+// =====================================================
+// WORD GAMES
+// =====================================================
 
 const wordGames = [
-  [
-    "KOMPUTER",
-    "komputer"
-  ],
-  [
-    "WHATSAPP",
-    "whatsapp"
-  ],
-  [
-    "INTERNET",
-    "internet"
-  ],
-  [
-    "INDONESIA",
-    "indonesia"
-  ],
-  [
-    "TEKNOLOGI",
-    "teknologi"
-  ]
+  {
+    question: "Susun kata: T-A-M-E",
+    answer: "meat"
+  },
+  {
+    question: "Susun kata: K-A-M-E-R",
+    answer: "kram"
+  },
+  {
+    question: "Susun kata: A-K-A-Y",
+    answer: "kaya"
+  },
+  {
+    question: "Susun kata: B-A-T-U",
+    answer: "batu"
+  }
 ];
 
-const gameSessions =
-  new Map();
+// =====================================================
+// GAME SESSIONS
+// =====================================================
+
+const gameSessions = new Map();
+
+// =====================================================
+// CLEAN TEXT
+// =====================================================
+
+function cleanText(text = "") {
+  return String(text)
+    .toLowerCase()
+    .trim()
+    .replace(/[^\p{L}\p{N}\s]/gu, "");
+}
+
+// =====================================================
+// START GAME
+// =====================================================
 
 function startGame(
   chat,
-  question,
-  answer,
-  type = "game"
+  player,
+  type,
+  data
 ) {
-  gameSessions.set(
-    chat,
-    {
-      type,
-      question,
-      answer:
-        String(answer)
-          .toLowerCase(),
-      startedAt:
-        Date.now()
-    }
-  );
+  gameSessions.set(chat, {
+    player,
+    type,
+    data,
+    startedAt: Date.now()
+  });
 }
+
+// =====================================================
+// STOP GAME
+// =====================================================
 
 function stopGame(chat) {
+  const exists =
+    gameSessions.has(chat);
+
   gameSessions.delete(chat);
+
+  return exists;
 }
 
-// ==========================================
-// STICKER HELPERS
-// ==========================================
+// =====================================================
+// SIMPLE GAME QUESTION
+// =====================================================
 
-async function makeStaticSticker(
-  buffer
-) {
-  return sharp(buffer)
-    .resize(512, 512, {
-      fit: "contain",
-      background: {
-        r: 0,
-        g: 0,
-        b: 0,
-        alpha: 0
-      }
-    })
-    .webp()
-    .toBuffer();
-}
-
-async function textSticker(
-  text,
-  background = "#ffffff",
-  foreground = "#111111"
-) {
-  const safe =
-    String(text)
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .slice(0, 100);
-
-  const svg = `
-  <svg
-    width="512"
-    height="512"
-    xmlns="http://www.w3.org/2000/svg"
-  >
-    <rect
-      width="512"
-      height="512"
-      rx="60"
-      fill="${background}"
-    />
-
-    <text
-      x="256"
-      y="256"
-      text-anchor="middle"
-      dominant-baseline="middle"
-      font-family="Arial"
-      font-size="42"
-      font-weight="bold"
-      fill="${foreground}"
-    >
-      ${safe}
-    </text>
-  </svg>
-  `;
-
-  return sharp(
-    Buffer.from(svg)
-  )
-    .webp()
-    .toBuffer();
-}
-
-// ==========================================
-// QR
-// ==========================================
-
-async function sendQR(
-  chat,
-  text
-) {
-  const buffer =
-    await QRCode.toBuffer(
-      text,
-      {
-        width: 700,
-        margin: 2
-      }
-    );
-
-  return sock.sendMessage(
-    chat,
-    {
-      image: buffer,
-      caption:
-        "✅ QR berhasil dibuat."
-    }
-  );
-}
-
-// ==========================================
-// SEARCH HELPERS
-// ==========================================
-
-function googleSearch(
-  query
-) {
-  return (
-    "https://www.google.com/search?q=" +
-    encodeURIComponent(query)
-  );
-}
-
-function googleImageSearch(
-  query
-) {
-  return (
-    "https://www.google.com/search?tbm=isch&q=" +
-    encodeURIComponent(query)
-  );
-}
-
-function youtubeSearch(
-  query
-) {
-  return (
-    "https://www.youtube.com/results?search_query=" +
-    encodeURIComponent(query)
-  );
-}
-
-function wikipediaSearch(
-  query
-) {
-  return (
-    "https://id.wikipedia.org/w/index.php?search=" +
-    encodeURIComponent(query)
-  );
-}
-
-function lyricSearch(
-  query
-) {
-  return (
-    "https://www.google.com/search?q=" +
-    encodeURIComponent(
-      `${query} lyrics`
+function randomRiddle() {
+  return riddles[
+    Math.floor(
+      Math.random() * riddles.length
     )
-  );
+  ];
 }
 
-async function tinyUrl(url) {
-  const response =
-    await fetch(
-      "https://tinyurl.com/api-create.php?url=" +
-      encodeURIComponent(url)
-    );
+// =====================================================
 
-  if (!response.ok) {
-    throw new Error(
-      "Shortlink gagal"
-    );
+function randomWordGame() {
+  return wordGames[
+    Math.floor(
+      Math.random() * wordGames.length
+    )
+  ];
+}
+
+// =====================================================
+// MATH GAME
+// =====================================================
+
+function createMathQuestion() {
+  const a =
+    Math.floor(Math.random() * 20) + 1;
+
+  const b =
+    Math.floor(Math.random() * 20) + 1;
+
+  const operators = ["+", "-", "*"];
+
+  const operator =
+    operators[
+      Math.floor(
+        Math.random() * operators.length
+      )
+    ];
+
+  let answer;
+
+  if (operator === "+") {
+    answer = a + b;
   }
 
-  return response.text();
+  if (operator === "-") {
+    answer = a - b;
+  }
+
+  if (operator === "*") {
+    answer = a * b;
+  }
+
+  return {
+    question: `${a} ${operator} ${b} = ?`,
+    answer: String(answer)
+  };
 }
 
-// ==========================================
-// AI
-// ==========================================
+// =====================================================
+// ORDER ID
+// =====================================================
 
-async function openAI(
-  prompt
+function createOrder(
+  userNumber,
+  product
 ) {
-  const apiKey =
-    process.env.OPENAI_API_KEY;
+  const id =
+    "ZS" +
+    Date.now().toString(36).toUpperCase() +
+    randomId(4).toUpperCase();
 
-  if (!apiKey) {
-    return (
-      "⚠️ OPENAI_API_KEY belum dipasang " +
-      "di environment hosting."
-    );
+  if (!db.orders) {
+    db.orders = {};
   }
 
-  const response =
-    await fetch(
-      "https://api.openai.com/v1/responses",
-      {
-        method: "POST",
+  db.orders[id] = {
+    id,
+    user: userNumber,
+    productId: product.id,
+    productName: product.name,
+    price: product.price,
+    status: "pending",
+    createdAt: Date.now()
+  };
 
-        headers: {
-          "Content-Type":
-            "application/json",
+  saveDB();
 
-          "Authorization":
-            `Bearer ${apiKey}`
-        },
+  return db.orders[id];
+}
 
-        body: JSON.stringify({
-          model:
-            process.env.OPENAI_MODEL ||
-            "gpt-4.1-mini",
+// =====================================================
+// GET ORDER
+// =====================================================
 
-          input: prompt
-        })
-      }
-    );
-
-  if (!response.ok) {
-    const errorText =
-      await response.text();
-
-    throw new Error(
-      errorText.slice(0, 500)
-    );
+function getOrder(orderId = "") {
+  if (!db.orders) {
+    db.orders = {};
   }
 
-  const data =
-    await response.json();
+  return db.orders[
+    String(orderId).trim().toUpperCase()
+  ] || null;
+}
 
-  if (data.output_text) {
-    return data.output_text;
+// =====================================================
+// BALANCE
+// =====================================================
+
+function getBalance(jid) {
+  const user = getUser(jid);
+
+  return user
+    ? Number(user.balance || 0)
+    : 0;
+}
+
+// =====================================================
+
+function addBalance(
+  jid,
+  amount
+) {
+  const user = getUser(jid);
+
+  if (!user) {
+    return false;
   }
 
-  const texts = [];
+  user.balance =
+    Number(user.balance || 0) +
+    Number(amount || 0);
 
-  for (
-    const item of
-    data.output || []
-  ) {
-    for (
-      const content of
-      item.content || []
-    ) {
-      if (content.text) {
-        texts.push(
-          content.text
-        );
-      }
+  saveDB();
+
+  return true;
+}
+
+// =====================================================
+// LIMIT
+// =====================================================
+
+function addLimit(
+  jid,
+  amount = 1
+) {
+  const user = getUser(jid);
+
+  if (!user) {
+    return false;
+  }
+
+  user.limit =
+    Number(user.limit || 0) +
+    Number(amount || 0);
+
+  saveDB();
+
+  return true;
+}
+
+// =====================================================
+// POINT
+// =====================================================
+
+function addPoint(
+  jid,
+  amount = 1
+) {
+  const user = getUser(jid);
+
+  if (!user) {
+    return false;
+  }
+
+  user.points =
+    Number(user.points || 0) +
+    Number(amount || 0);
+
+  saveDB();
+
+  return true;
+}
+
+// =====================================================
+// WARNING
+// =====================================================
+
+function addWarning(
+  chat,
+  jid
+) {
+  const group = getGroup(chat);
+
+  const number =
+    jidNumber(jid);
+
+  group.warnings[number] =
+    Number(group.warnings[number] || 0) + 1;
+
+  saveDB();
+
+  return group.warnings[number];
+}
+
+// =====================================================
+
+function removeWarning(
+  chat,
+  jid
+) {
+  const group = getGroup(chat);
+
+  const number =
+    jidNumber(jid);
+
+  group.warnings[number] =
+    Math.max(
+      0,
+      Number(group.warnings[number] || 0) - 1
+    );
+
+  saveDB();
+
+  return group.warnings[number];
+}
+
+// =====================================================
+// MENTION HELPER
+// =====================================================
+
+function mentionUser(jid) {
+  return `@${jidNumber(jid)}`;
+}
+
+// =====================================================
+// TIME
+// =====================================================
+
+function formatDate(timestamp) {
+  return new Date(
+    timestamp
+  ).toLocaleString(
+    "id-ID",
+    {
+      timeZone: "Asia/Jakarta"
     }
-  }
-
-  return (
-    text s.join("\n") ||
-    "AI tidak memberikan jawaban."
   );
-    }
-// ==========================================
+}
+
+// =====================================================
+// PREMIUM DURATION
+// =====================================================
+
+function activatePremium(
+  jid,
+  duration
+) {
+  const user = getUser(jid);
+
+  if (!user) {
+    return false;
+  }
+
+  user.premium = true;
+
+  user.premiumUntil =
+    Date.now() + duration;
+
+  db.premium[jidNumber(jid)] = {
+    until: user.premiumUntil
+  };
+
+  saveDB();
+
+  return true;
+}
+
+// =====================================================
+// DATABASE INITIALIZATION
+// =====================================================
+
+if (!db.orders) {
+  db.orders = {};
+}
+
+if (!db.premium) {
+  db.premium = {};
+}
+
+saveDB();
+
+console.log(
+  `${BOT_NAME} PART 2 loaded successfully.`
+);
+// =====================================================
+// ZAZABOT - PART 3
 // COMMAND HANDLER
-// ==========================================
+// =====================================================
 
 async function handleCommand(
   message,
@@ -1307,532 +1271,467 @@ async function handleCommand(
   args,
   text
 ) {
-  const chat =
-    getChat(message);
+  const chat = getChat(message);
+  const sender = getSender(message);
+  const user = getUser(sender);
 
-  const sender =
-    getSender(message);
-
-  const reply = (
-    content,
-    options = {}
-  ) => {
-    return sendText(
-      chat,
-      content,
-      options
-    );
-  };
-
-  const user =
-    getUser(sender);
+  if (!user) {
+    return;
+  }
 
   db.stats.commands++;
+  saveDB();
 
-  // ========================================
+  // ===================================================
   // GENERAL
-  // ========================================
+  // ===================================================
 
   if (
     command === "menu" ||
     command === "help"
   ) {
-    return reply(
-      menuText(sender)
+    await sendText(
+      chat,
+      menuText
     );
+    return;
   }
 
   if (command === "ping") {
-    const start =
-      Date.now();
+    const start = Date.now();
 
-    await reply(
-      "🏓 Pong..."
+    await sendText(
+      chat,
+      "🏓 Menghitung ping..."
     );
 
-    return reply(
-      `⚡ Response: ${
-        Date.now() - start
-      } ms`
+    const ping =
+      Date.now() - start;
+
+    await sendText(
+      chat,
+      `🏓 Pong!\n\n⚡ Speed: ${ping} ms`
     );
+
+    return;
   }
 
   if (command === "speed") {
-    return reply(
-      `⚡ Speed: ${
-        Date.now() - startedAt
-      } ms sejak bot start.`
+    const speed =
+      Date.now() - startedAt;
+
+    await sendText(
+      chat,
+      `⚡ ZazaBot aktif!\n\nRuntime: ${formatRuntime(speed)}`
     );
+
+    return;
   }
 
   if (command === "runtime") {
-    return reply(
-      `⏱️ Runtime: ${
-        formatRuntime(
-          Date.now() - startedAt
-        )
-      }`
+    await sendText(
+      chat,
+      `⏱️ Runtime ZazaBot\n\n${formatRuntime(
+        Date.now() - startedAt
+      )}`
     );
+
+    return;
   }
 
   if (command === "botinfo") {
-    return reply(
-      `🤖 *${BOT_NAME}*\n\n` +
-      `📡 Status: ${connectionStatus}\n` +
-      `🔓 Mode: ${
-        publicMode
-          ? "Public"
-          : "Self"
-      }\n` +
-      `👤 Users: ${
-        Object.keys(
-          db.users
-        ).length
-      }\n` +
-      `👥 Groups: ${
-        Object.keys(
-          db.groups
-        ).length
-      }\n` +
-      `📦 Orders: ${
-        Object.keys(
-          db.orders
-        ).length
-      }\n` +
-      `💬 Messages: ${
-        db.stats.messages
-      }\n` +
-      `⚡ Commands: ${
-        db.stats.commands
-      }`
+    const mode =
+      publicMode
+        ? "PUBLIC"
+        : "SELF";
+
+    await sendText(
+      chat,
+      `╭━━━〔 🤖 BOT INFO 〕━━━╮
+┃
+┃ Nama    : ${BOT_NAME}
+┃ Prefix  : ${PREFIX}
+┃ Mode    : ${mode}
+┃ Owner   : ${OWNER_NUMBER}
+┃ Status  : ${connectionStatus}
+┃
+╰━━━━━━━━━━━━━━━━━━╯`
     );
+
+    return;
   }
 
   if (command === "profile") {
-    return reply(
-      `👤 *PROFILE*\n\n` +
-      `📱 Nomor: ${jidNumber(sender)}\n` +
-      `💰 Saldo: ${formatRupiah(
-        user.balance
-      )}\n` +
-      `⚡ Limit: ${user.limit}\n` +
-      `⭐ Poin: ${
-        user.points || 0
-      }\n` +
-      `💎 Premium: ${
-        isPremium(sender)
-          ? "Ya"
-          : "Tidak"
-      }\n` +
-      `⚠️ Warn: ${
-        user.warn || 0
-      }`
+    await sendText(
+      chat,
+      `╭━━━〔 👤 PROFILE 〕━━━╮
+┃
+┃ Nomor   : ${jidNumber(sender)}
+┃ Saldo   : ${formatRupiah(user.balance)}
+┃ Limit   : ${user.limit}
+┃ Poin    : ${user.points}
+┃ Premium : ${isPremium(sender) ? "YES" : "NO"}
+┃ Warn    : ${user.warn}
+┃
+╰━━━━━━━━━━━━━━━━━━╯`
     );
+
+    return;
   }
 
   if (command === "rules") {
-    return reply(
-      `📜 *RULES ZAZABOT*\n\n` +
-      `1. Jangan spam bot.\n` +
-      `2. Jangan kirim konten ilegal.\n` +
-      `3. Jangan menyalahgunakan fitur bot.\n` +
-      `4. Hormati admin grup.\n` +
-      `5. Gunakan bot dengan bijak.\n` +
-      `6. Transaksi Zaza Store sesuai ketentuan.`
+    await sendText(
+      chat,
+      `╭━━━〔 📜 RULES ZAZABOT 〕━━━╮
+┃
+┃ 1. Jangan spam bot.
+┃ 2. Jangan kirim konten ilegal.
+┃ 3. Jangan menyalahgunakan bot.
+┃ 4. Gunakan perintah sesuai fungsinya.
+┃ 5. Hormati admin grup.
+┃
+╰━━━━━━━━━━━━━━━━━━╯`
     );
+
+    return;
   }
 
-  if (command === "donate") {
-    return reply(
-      `💙 *DONATE ${BOT_NAME}*\n\n` +
-      `Terima kasih telah mendukung ZazaBot.\n\n` +
-      `💳 Pembayaran:\n` +
-      `QRIS / DANA / BANK\n\n` +
-      `👑 Owner:\n` +
-      `wa.me/${OWNER_NUMBER}`
-    );
-  }
-
-  // ========================================
+  // ===================================================
   // OWNER
-  // ========================================
+  // ===================================================
 
   if (command === "owner") {
-    return reply(
-      `👑 *OWNER ZAZABOT*\n\n` +
-      `📱 wa.me/${OWNER_NUMBER}`
+    await sendText(
+      chat,
+      `👑 Owner ${BOT_NAME}\n\n@${OWNER_NUMBER}`,
+      {
+        mentions: [
+          userJid(OWNER_NUMBER)
+        ]
+      }
     );
+
+    return;
   }
 
   if (command === "cekowner") {
-    return reply(
-      `👑 Owner tersimpan:\n` +
-      `${db.settings.owner ||
-        OWNER_NUMBER}`
+    await sendText(
+      chat,
+      isOwner(sender)
+        ? "✅ Kamu adalah owner."
+        : "❌ Kamu bukan owner."
     );
+
+    return;
   }
 
   if (command === "setowner") {
-    if (
-      !needOwner(
-        sender,
-        reply
-      )
-    ) return;
-
-    const target =
-      targetFromMessage(
-        message,
-        args
-      );
-
-    if (!target) {
-      return reply(
-        `Contoh:\n${PREFIX}setowner 628xxxx`
-      );
+    if (!(await needOwner(message))) {
+      return;
     }
 
-    db.settings.owner =
-      jidNumber(target);
+    const number =
+      String(args[0] || "")
+        .replace(/\D/g, "");
+
+    if (!number) {
+      await sendText(
+        chat,
+        `Contoh:\n${PREFIX}setowner 628xxxxxxxxxx`
+      );
+      return;
+    }
+
+    db.settings.owner = number;
 
     saveDB();
 
-    return reply(
-      `✅ Owner berhasil diubah.\n\n` +
-      `👑 Owner baru:\n` +
-      `${db.settings.owner}`
+    await sendText(
+      chat,
+      `✅ Owner berhasil diubah menjadi ${number}`
     );
+
+    return;
   }
 
   if (command === "public") {
-    if (
-      !needOwner(
-        sender,
-        reply
-      )
-    ) return;
+    if (!(await needOwner(message))) {
+      return;
+    }
 
     publicMode = true;
 
-    db.settings.public =
-      true;
-
-    saveDB();
-
-    return reply(
-      "✅ Bot sekarang dalam mode PUBLIC."
+    await sendText(
+      chat,
+      "✅ Mode PUBLIC aktif."
     );
+
+    return;
   }
 
   if (command === "self") {
-    if (
-      !needOwner(
-        sender,
-        reply
-      )
-    ) return;
+    if (!(await needOwner(message))) {
+      return;
+    }
 
     publicMode = false;
 
-    db.settings.public =
-      false;
-
-    saveDB();
-
-    return reply(
-      "🔒 Bot sekarang dalam mode SELF.\n" +
-      "Hanya owner yang dapat menggunakan command."
+    await sendText(
+      chat,
+      "✅ Mode SELF aktif."
     );
+
+    return;
   }
 
   if (command === "ban") {
-    if (
-      !needOwner(
-        sender,
-        reply
-      )
-    ) return;
+    if (!(await needOwner(message))) {
+      return;
+    }
 
     const target =
       targetFromMessage(
         message,
         args
       );
-
-    if (!target) {
-      return reply(
-        `Contoh:\n${PREFIX}ban 628xxxx`
-      );
-    }
 
     const number =
       jidNumber(target);
 
-    if (
-      !db.banned.includes(
-        number
-      )
-    ) {
-      db.banned.push(
-        number
+    if (!number) {
+      await sendText(
+        chat,
+        "❌ Nomor tidak ditemukan."
       );
+      return;
+    }
+
+    if (!db.banned.includes(number)) {
+      db.banned.push(number);
     }
 
     saveDB();
 
-    return reply(
-      `🚫 Nomor ${number} berhasil dibanned.`
+    await sendText(
+      chat,
+      `🚫 Nomor ${number} berhasil diban.`
     );
+
+    return;
   }
 
   if (command === "unban") {
-    if (
-      !needOwner(
-        sender,
-        reply
-      )
-    ) return;
+    if (!(await needOwner(message))) {
+      return;
+    }
 
     const target =
       targetFromMessage(
         message,
         args
       );
-
-    if (!target) {
-      return reply(
-        `Contoh:\n${PREFIX}unban 628xxxx`
-      );
-    }
 
     const number =
       jidNumber(target);
 
     db.banned =
       db.banned.filter(
-        item =>
-          item !== number
+        x => x !== number
       );
 
     saveDB();
 
-    return reply(
+    await sendText(
+      chat,
       `✅ Nomor ${number} berhasil di-unban.`
-    );
-  }
-
-  if (command === "listban") {
-    if (
-      !needOwner(
-        sender,
-        reply
-      )
-    ) return;
-
-    if (!db.banned.length) {
-      return reply(
-        "✅ Tidak ada nomor yang dibanned."
-      );
-    }
-
-    return reply(
-      `🚫 *LIST BANNED*\n\n` +
-      db.banned
-        .map(
-          (number, index) =>
-            `${index + 1}. ${number}`
-        )
-        .join("\n")
-    );
-  }
-
-  if (command === "addbalance") {
-    if (
-      !needOwner(
-        sender,
-        reply
-      )
-    ) return;
-
-    const target =
-      targetFromMessage(
-        message,
-        args
-      );
-
-    const amount =
-      Number(
-        args.find(
-          item =>
-            /^\d+$/.test(item)
-        ) || 0
-      );
-
-    if (
-      !target ||
-      !amount
-    ) {
-      return reply(
-        `Contoh:\n${PREFIX}addbalance 628xxxx 10000`
-      );
-    }
-
-    const targetUser =
-      getUser(target);
-
-    targetUser.balance +=
-      amount;
-
-    saveDB();
-
-    return reply(
-      `✅ Saldo berhasil ditambahkan.\n\n` +
-      `👤 ${jidNumber(target)}\n` +
-      `💰 +${formatRupiah(amount)}\n` +
-      `💳 Total: ${formatRupiah(
-        targetUser.balance
-      )}`
-    );
-  }
-
-  if (command === "addlimit") {
-    if (
-      !needOwner(
-        sender,
-        reply
-      )
-    ) return;
-
-    const target =
-      targetFromMessage(
-        message,
-        args
-      );
-
-    const amount =
-      Number(
-        args.find(
-          item =>
-            /^\d+$/.test(item)
-        ) || 0
-      );
-
-    if (
-      !target ||
-      !amount
-    ) {
-      return reply(
-        `Contoh:\n${PREFIX}addlimit 628xxxx 10`
-      );
-    }
-
-    const targetUser =
-      getUser(target);
-
-    targetUser.limit +=
-      amount;
-
-    saveDB();
-
-    return reply(
-      `✅ Limit berhasil ditambahkan.\n\n` +
-      `👤 ${jidNumber(target)}\n` +
-      `⚡ +${amount}\n` +
-      `📊 Total: ${targetUser.limit}`
-    );
-  }
-
-  if (command === "bc") {
-    if (
-      !needOwner(
-        sender,
-        reply
-      )
-    ) return;
-
-    const broadcast =
-      args.join(" ").trim();
-
-    if (!broadcast) {
-      return reply(
-        `Contoh:\n${PREFIX}bc Halo semua`
-      );
-    }
-
-    let sent = 0;
-
-    for (
-      const number
-      of Object.keys(db.users)
-    ) {
-      try {
-        await sendText(
-          userJid(number),
-          `📢 *BROADCAST ZAZABOT*\n\n${broadcast}`
-        );
-
-        sent++;
-      } catch {}
-    }
-
-    return reply(
-      `✅ Broadcast selesai.\n` +
-      `📨 Terkirim: ${sent} user`
-    );
-  }
-
-  if (command === "restart") {
-    if (
-      !needOwner(
-        sender,
-        reply
-      )
-    ) return;
-
-    await reply(
-      "♻️ Bot akan melakukan restart..."
-    );
-
-    setTimeout(
-      () => process.exit(0),
-      1000
     );
 
     return;
   }
 
-  // ========================================
-  // ZAZA STORE
-  // ========================================
+  if (command === "listban") {
+    if (!(await needOwner(message))) {
+      return;
+    }
+
+    if (!db.banned.length) {
+      await sendText(
+        chat,
+        "✅ Tidak ada user yang diban."
+      );
+      return;
+    }
+
+    const list =
+      db.banned
+        .map(
+          (number, index) =>
+            `${index + 1}. ${number}`
+        )
+        .join("\n");
+
+    await sendText(
+      chat,
+      `🚫 LIST BAN\n\n${list}`
+    );
+
+    return;
+  }
+
+  if (command === "addbalance") {
+    if (!(await needOwner(message))) {
+      return;
+    }
+
+    const target =
+      targetFromMessage(
+        message,
+        args
+      );
+
+    const amount =
+      Number(
+        args.find(
+          x => /^\d+$/.test(x)
+        ) || 0
+      );
+
+    if (!amount) {
+      await sendText(
+        chat,
+        `Contoh:\n${PREFIX}addbalance 628xxxxxxxxxx 10000`
+      );
+      return;
+    }
+
+    addBalance(
+      target,
+      amount
+    );
+
+    await sendText(
+      chat,
+      `✅ Saldo berhasil ditambahkan.\n\n👤 ${jidNumber(target)}\n💰 ${formatRupiah(amount)}`
+    );
+
+    return;
+  }
+
+  if (command === "addlimit") {
+    if (!(await needOwner(message))) {
+      return;
+    }
+
+    const target =
+      targetFromMessage(
+        message,
+        args
+      );
+
+    const amount =
+      Number(
+        args.find(
+          x => /^\d+$/.test(x)
+        ) || 0
+      );
+
+    if (!amount) {
+      await sendText(
+        chat,
+        `Contoh:\n${PREFIX}addlimit 628xxxxxxxxxx 10`
+      );
+      return;
+    }
+
+    addLimit(
+      target,
+      amount
+    );
+
+    await sendText(
+      chat,
+      `✅ Limit berhasil ditambahkan.\n\n👤 ${jidNumber(target)}\n📦 +${amount} limit`
+    );
+
+    return;
+  }
+
+  if (command === "bc") {
+    if (!(await needOwner(message))) {
+      return;
+    }
+
+    if (!text) {
+      await sendText(
+        chat,
+        `Contoh:\n${PREFIX}bc Halo semua`
+      );
+      return;
+    }
+
+    const users =
+      Object.keys(db.users);
+
+    let success = 0;
+
+    for (const number of users) {
+      try {
+        await sendText(
+          userJid(number),
+          `📢 *BROADCAST ${BOT_NAME}*\n\n${text}`
+        );
+
+        success++;
+      } catch {
+        // lanjut ke user berikutnya
+      }
+    }
+
+    await sendText(
+      chat,
+      `✅ Broadcast selesai.\n\nTerkirim: ${success}`
+    );
+
+    return;
+  }
+
+  // ===================================================
+  // STORE
+  // ===================================================
 
   if (
     command === "produk" ||
     command === "pricelist"
   ) {
-    return reply(
-      productList()
+    await sendText(
+      chat,
+      productListText()
     );
+
+    return;
   }
 
   if (
     command === "saldo" ||
     command === "balance"
   ) {
-    return reply(
-      `💰 *SALDO KAMU*\n\n` +
-      `${formatRupiah(
-        user.balance
+    await sendText(
+      chat,
+      `💰 Saldo kamu: ${formatRupiah(
+        getBalance(sender)
       )}`
     );
+
+    return;
   }
 
   if (command === "topup") {
-    return reply(
-      `💳 *TOP UP SALDO*\n\n` +
-      `Silakan hubungi owner untuk instruksi pembayaran.\n\n` +
-      `👑 Owner:\n` +
-      `wa.me/${OWNER_NUMBER}`
+    await sendText(
+      chat,
+      `💳 *TOP UP SALDO*\n\nSilakan hubungi owner untuk melakukan top up.\n\n👑 Owner: ${OWNER_NUMBER}`
     );
+
+    return;
   }
 
   if (
@@ -1840,1342 +1739,1186 @@ async function handleCommand(
     command === "buy" ||
     command === "beli"
   ) {
-    const query =
-      args.join(" ").trim();
+    const productId =
+      args[0];
 
-    if (!query) {
-      return reply(
-        `🛒 *CARA ORDER*\n\n` +
-        `Contoh:\n` +
-        `${PREFIX}order spotify 1 bulan\n\n` +
-        productList()
+    if (!productId) {
+      await sendText(
+        chat,
+        `❌ Masukkan ID produk.\n\nContoh:\n${PREFIX}order spotify1\n\nKetik ${PREFIX}produk untuk melihat produk.`
       );
+      return;
     }
 
     const product =
-      findProduct(query);
+      findProduct(productId);
 
     if (!product) {
-      return reply(
-        "❌ Produk tidak ditemukan.\n\n" +
-        `Ketik ${PREFIX}produk untuk melihat produk.`
+      await sendText(
+        chat,
+        "❌ Produk tidak ditemukan."
       );
+      return;
     }
 
-    if (
-      user.balance <
-      product.price
-    ) {
-      return reply(
-        `❌ *SALDO TIDAK CUKUP*\n\n` +
-        `📦 Produk: ${product.name}\n` +
-        `⏱️ Durasi: ${product.duration}\n` +
-        `💰 Harga: ${formatRupiah(
-          product.price
-        )}\n` +
-        `💳 Saldo: ${formatRupiah(
-          user.balance
-        )}`
-      );
-    }
-
-    user.balance -=
-      product.price;
-
-    const orderId =
-      randomId("ORD");
-
-    db.orders[orderId] = {
-      id: orderId,
-
-      user:
+    const order =
+      createOrder(
         jidNumber(sender),
+        product
+      );
 
-      product: product,
-
-      status:
-        "paid",
-
-      createdAt:
-        Date.now()
-    };
-
-    saveDB();
-
-    return reply(
-      `✅ *ORDER BERHASIL*\n\n` +
-      `🆔 ID: ${orderId}\n` +
-      `📦 Produk: ${product.name}\n` +
-      `⏱️ Durasi: ${product.duration}\n` +
-      `💰 Harga: ${formatRupiah(
-        product.price
-      )}\n` +
-      `📌 Status: PAID\n\n` +
-      `⏳ Silakan tunggu proses dari owner.`
+    await sendText(
+      chat,
+      `╭━━━〔 🛒 ORDER 〕━━━╮
+┃
+┃ ID Order : ${order.id}
+┃ Produk   : ${product.name}
+┃ Harga    : ${formatRupiah(product.price)}
+┃ Status   : PENDING
+┃
+┣━━━━━━━━━━━━━━━━━━
+┃ Silakan lakukan pembayaran
+┃ sesuai instruksi owner.
+┃
+╰━━━━━━━━━━━━━━━━━━╯`
     );
+
+    return;
   }
 
   if (
     command === "cekorder" ||
     command === "orderstatus"
   ) {
-    const id =
+    const orderId =
       args[0];
 
-    if (id) {
-      const order =
-        db.orders[id];
-
-      if (!order) {
-        return reply(
-          "❌ Order tidak ditemukan."
-        );
-      }
-
-      return reply(
-        `📦 *DETAIL ORDER*\n\n` +
-        `🆔 ID: ${order.id}\n` +
-        `📦 Produk: ${order.product.name}\n` +
-        `⏱️ Durasi: ${order.product.duration}\n` +
-        `💰 Harga: ${formatRupiah(
-          order.product.price
-        )}\n` +
-        `📌 Status: ${order.status}`
+    if (!orderId) {
+      await sendText(
+        chat,
+        `Contoh:\n${PREFIX}cekorder ZSXXXX`
       );
+      return;
     }
 
-    const orders =
-      Object.values(
-        db.orders
-      )
-      .filter(
-        order =>
-          order.user ===
-          jidNumber(sender)
-      )
-      .slice(-10);
+    const order =
+      getOrder(orderId);
 
-    if (!orders.length) {
-      return reply(
-        "📦 Kamu belum memiliki order."
+    if (!order) {
+      await sendText(
+        chat,
+        "❌ Order tidak ditemukan."
       );
+      return;
     }
 
-    return reply(
-      `📦 *ORDER KAMU*\n\n` +
-      orders
-        .map(
-          order =>
-            `🆔 ${order.id}\n` +
-            `📦 ${order.product.name}\n` +
-            `💰 ${formatRupiah(
-              order.product.price
-            )}\n` +
-            `📌 ${order.status}`
-        )
-        .join("\n\n")
+    await sendText(
+      chat,
+      `╭━━━〔 📦 ORDER 〕━━━╮
+┃
+┃ ID      : ${order.id}
+┃ Produk  : ${order.productName}
+┃ Harga   : ${formatRupiah(order.price)}
+┃ Status  : ${order.status}
+┃ Dibuat  : ${formatDate(order.createdAt)}
+┃
+╰━━━━━━━━━━━━━━━━━━╯`
     );
+
+    return;
   }
+
+  // ===================================================
+  // PREMIUM
+  // ===================================================
 
   if (command === "premium") {
+    const durationText =
+      args[0] || "7d";
+
     const duration =
-      parseDuration(
-        args.join(" ")
-      ) ||
-      30 *
-      24 *
-      60 *
-      60 *
-      1000;
+      parseDuration(durationText);
 
-    const price =
-      15000;
-
-    if (
-      user.balance <
-      price
-    ) {
-      return reply(
-        `❌ Saldo tidak cukup.\n\n` +
-        `💎 Harga Premium: ${formatRupiah(
-          price
-        )}\n` +
-        `💰 Saldo kamu: ${formatRupiah(
-          user.balance
-        )}`
+    if (!duration) {
+      await sendText(
+        chat,
+        `❌ Format durasi salah.\n\nContoh:\n${PREFIX}premium 7d\n${PREFIX}premium 30d`
       );
+      return;
     }
 
-    user.balance -=
-      price;
+    if (!isOwner(sender)) {
+      await sendText(
+        chat,
+        `💎 Premium ${durationText} tersedia melalui owner.\n\n👑 Owner: ${OWNER_NUMBER}`
+      );
+      return;
+    }
 
-    user.premium =
-      true;
+    const target =
+      targetFromMessage(
+        message,
+        args.slice(1)
+      );
 
-    user.premiumUntil =
-      Math.max(
-        Date.now(),
-        user.premiumUntil || 0
-      ) + duration;
-
-    saveDB();
-
-    return reply(
-      `💎 *PREMIUM AKTIF*\n\n` +
-      `📅 Berlaku sampai:\n` +
-      `${new Date(
-        user.premiumUntil
-      ).toLocaleString(
-        "id-ID"
-      )}`
+    activatePremium(
+      target,
+      duration
     );
+
+    await sendText(
+      chat,
+      `✅ Premium berhasil diaktifkan untuk ${jidNumber(target)} selama ${durationText}.`
+    );
+
+    return;
   }
 
-  if (
-    command === "cekpremium"
-  ) {
+  if (command === "cekpremium") {
+    const premium =
+      isPremium(sender);
+
+    const userData =
+      getUser(sender);
+
+    let textPremium =
+      premium
+        ? "✅ AKTIF"
+        : "❌ TIDAK AKTIF";
+
     if (
-      isPremium(sender)
+      premium &&
+      userData.premiumUntil
     ) {
-      return reply(
-        `💎 *PREMIUM AKTIF*\n\n` +
-        `📅 Sampai:\n` +
-        `${new Date(
-          user.premiumUntil
-        ).toLocaleString(
-          "id-ID"
-        )}`
-      );
+      textPremium +=
+        `\nBerakhir: ${formatDate(
+          userData.premiumUntil
+        )}`;
     }
 
-    return reply(
-      "❌ Kamu belum memiliki Premium."
+    await sendText(
+      chat,
+      `💎 STATUS PREMIUM\n\n${textPremium}`
     );
+
+    return;
   }
 
-  // ========================================
-  // AI
-  // ========================================
+  // ===================================================
+  // AI PLACEHOLDER
+  // ===================================================
 
   if (
-    [
-      "ai",
-      "openai",
-      "ask",
-      "bard",
-      "nexara"
-    ].includes(command)
+    command === "ai" ||
+    command === "openai" ||
+    command === "ask" ||
+    command === "bard" ||
+    command === "nexara"
   ) {
-    const prompt =
-      args.join(" ").trim();
-
-    if (!prompt) {
-      return reply(
-        `Contoh:\n${PREFIX}${command} jelaskan AI`
+    if (!text) {
+      await sendText(
+        chat,
+        `Contoh:\n${PREFIX}ai jelaskan tentang Indonesia`
       );
+      return;
     }
 
-    try {
-      const answer =
-        await openAI(prompt);
+    await sendText(
+      chat,
+      `🤖 *AI*\n\nPertanyaan diterima:\n${text}\n\n⚠️ Provider AI belum dikonfigurasi.`
+    );
 
-      return reply(
-        `🤖 *AI ZAZABOT*\n\n${answer}`
-      );
-    } catch (error) {
-      return reply(
-        `❌ AI Error:\n${error.message}`
-      );
-    }
+    return;
   }
 
   if (command === "translate") {
-    const data =
-      args.join(" ")
-        .split("|");
-
-    const language =
-      (
-        data[0] ||
-        "en"
-      ).trim();
-
-    const source =
-      data
-        .slice(1)
-        .join("|")
-        .trim();
-
-    if (!source) {
-      return reply(
-        `Contoh:\n${PREFIX}translate en | saya suka belajar`
+    if (!text) {
+      await sendText(
+        chat,
+        `Contoh:\n${PREFIX}translate hello world`
       );
+      return;
     }
 
-    try {
-      const url =
-        "https://translate.googleapis.com/" +
-        "translate_a/single" +
-        "?client=gtx" +
-        "&sl=auto" +
-        `&tl=${encodeURIComponent(
-          language
-        )}` +
-        "&dt=t" +
-        `&q=${encodeURIComponent(
-          source
-        )}`;
+    await sendText(
+      chat,
+      `🌐 Teks yang akan diterjemahkan:\n\n${text}\n\n⚠️ Provider translate belum dikonfigurasi.`
+    );
 
-      const response =
-        await fetch(url);
-
-      const data =
-        await response.json();
-
-      const result =
-        (data[0] || [])
-          .map(
-            item => item[0]
-          )
-          .join("");
-
-      return reply(
-        `🌐 *TRANSLATE*\n\n${result}`
-      );
-    } catch {
-      return reply(
-        "❌ Translate gagal."
-      );
-    }
+    return;
   }
 
   if (command === "aiimage") {
-    return reply(
-      `🖼️ *AI IMAGE*\n\n` +
-      `Fitur ini membutuhkan API image generation.\n` +
-      `Tambahkan provider/API terlebih dahulu.`
-    );
-}
-    // ========================================
-  // SEARCH
-  // ========================================
-
-  if (command === "google") {
-    const query =
-      args.join(" ").trim();
-
-    if (!query) {
-      return reply(
-        `Contoh:\n${PREFIX}google Zaza Store`
+    if (!text) {
+      await sendText(
+        chat,
+        `Contoh:\n${PREFIX}aiimage kucing lucu`
       );
+      return;
     }
 
-    return reply(
-      `🔎 *GOOGLE SEARCH*\n\n` +
-      googleSearch(query)
+    await sendText(
+      chat,
+      `🎨 Prompt diterima:\n\n${text}\n\n⚠️ Generator gambar belum dikonfigurasi.`
     );
+
+    return;
+  }
+
+  console.log(
+    `Command: ${command} | User: ${jidNumber(sender)}`
+  );
+    }
+// =====================================================
+// ZAZABOT - PART 4
+// SEARCH / DOWNLOAD / STICKER / TOOLS
+// =====================================================
+
+// =====================================================
+// SEARCH PLACEHOLDER
+// =====================================================
+
+async function googleSearch(query) {
+  return `🔎 Hasil Google untuk: ${query}\n\n⚠️ Google Search API belum dikonfigurasi.`;
+}
+
+// =====================================================
+
+async function googleImageSearch(query) {
+  return `🖼️ Pencarian gambar: ${query}\n\n⚠️ Google Image API belum dikonfigurasi.`;
+}
+
+// =====================================================
+
+async function wikipediaSearch(query) {
+  return `📚 Wikipedia: ${query}\n\n⚠️ Wikipedia API belum dikonfigurasi.`;
+}
+
+// =====================================================
+
+async function youtubeSearch(query) {
+  return `▶️ YouTube Search: ${query}\n\n⚠️ YouTube Search API belum dikonfigurasi.`;
+}
+
+// =====================================================
+
+async function lyricSearch(query) {
+  return `🎵 Lirik: ${query}\n\n⚠️ Lirik API belum dikonfigurasi.`;
+}
+
+// =====================================================
+// MEDIA HELPERS
+// =====================================================
+
+async function downloadMedia(
+  messageContent,
+  type = "image"
+) {
+  if (!sock || !messageContent) {
+    return null;
+  }
+
+  try {
+    const {
+      downloadContentFromMessage
+    } = await import(
+      "@whiskeysockets/baileys"
+    );
+
+    const stream =
+      await downloadContentFromMessage(
+        messageContent,
+        type
+      );
+
+    const chunks = [];
+
+    for await (const chunk of stream) {
+      chunks.push(chunk);
+    }
+
+    return Buffer.concat(chunks);
+
+  } catch (error) {
+    console.error(
+      "DOWNLOAD MEDIA ERROR:",
+      error.message
+    );
+
+    return null;
+  }
+}
+
+// =====================================================
+// STATIC STICKER
+// =====================================================
+
+async function makeStaticSticker(
+  buffer
+) {
+  if (!buffer) {
+    return null;
+  }
+
+  // Untuk sementara mengirim media asli
+  // agar bot tetap stabil tanpa ffmpeg/sharp.
+  return buffer;
+}
+
+// =====================================================
+// TEXT STICKER
+// =====================================================
+
+async function textSticker(
+  text
+) {
+  return Buffer.from(
+    String(text || "ZazaBot")
+  );
+}
+
+// =====================================================
+// SEND QR
+// =====================================================
+
+async function sendQR(
+  chat,
+  data
+) {
+  if (!data) {
+    await sendText(
+      chat,
+      "❌ QR tidak tersedia."
+    );
+
+    return;
+  }
+
+  try {
+    const buffer =
+      await QRCode.toBuffer(
+        data,
+        {
+          type: "png",
+          width: 600,
+          margin: 2
+        }
+      );
+
+    await sock.sendMessage(
+      chat,
+      {
+        image: buffer,
+        caption:
+          "📱 Silakan scan QR di atas."
+      }
+    );
+
+  } catch (error) {
+    console.error(
+      "SEND QR ERROR:",
+      error.message
+    );
+
+    await sendText(
+      chat,
+      "❌ Gagal membuat QR."
+    );
+  }
+}
+
+// =====================================================
+// TINY URL PLACEHOLDER
+// =====================================================
+
+async function tinyUrl(url) {
+  return url;
+}
+
+// =====================================================
+// COMMAND HANDLER PART 4
+// =====================================================
+
+async function handleCommandPart4(
+  message,
+  command,
+  args,
+  text
+) {
+  const chat = getChat(message);
+
+  // ===================================================
+  // SEARCH
+  // ===================================================
+
+  if (command === "google") {
+    if (!text) {
+      await sendText(
+        chat,
+        `Contoh:\n${PREFIX}google Zaza Store`
+      );
+      return true;
+    }
+
+    const result =
+      await googleSearch(text);
+
+    await sendText(
+      chat,
+      result
+    );
+
+    return true;
   }
 
   if (command === "googleimage") {
-    const query =
-      args.join(" ").trim();
-
-    if (!query) {
-      return reply(
+    if (!text) {
+      await sendText(
+        chat,
         `Contoh:\n${PREFIX}googleimage kucing`
       );
+      return true;
     }
 
-    return reply(
-      `🖼️ *GOOGLE IMAGE*\n\n` +
-      googleImageSearch(query)
+    const result =
+      await googleImageSearch(text);
+
+    await sendText(
+      chat,
+      result
     );
+
+    return true;
   }
 
   if (command === "wikipedia") {
-    const query =
-      args.join(" ").trim();
-
-    if (!query) {
-      return reply(
+    if (!text) {
+      await sendText(
+        chat,
         `Contoh:\n${PREFIX}wikipedia Indonesia`
       );
+      return true;
     }
 
-    return reply(
-      `📚 *WIKIPEDIA*\n\n` +
-      wikipediaSearch(query)
+    const result =
+      await wikipediaSearch(text);
+
+    await sendText(
+      chat,
+      result
     );
+
+    return true;
   }
 
   if (command === "ytsearch") {
-    const query =
-      args.join(" ").trim();
-
-    if (!query) {
-      return reply(
+    if (!text) {
+      await sendText(
+        chat,
         `Contoh:\n${PREFIX}ytsearch lagu Indonesia`
       );
+      return true;
     }
 
-    return reply(
-      `▶️ *YOUTUBE SEARCH*\n\n` +
-      youtubeSearch(query)
+    const result =
+      await youtubeSearch(text);
+
+    await sendText(
+      chat,
+      result
     );
+
+    return true;
   }
 
   if (command === "lirik") {
-    const query =
-      args.join(" ").trim();
-
-    if (!query) {
-      return reply(
+    if (!text) {
+      await sendText(
+        chat,
         `Contoh:\n${PREFIX}lirik judul lagu`
       );
+      return true;
     }
 
-    return reply(
-      `🎵 *PENCARIAN LIRIK*\n\n` +
-      lyricSearch(query)
+    const result =
+      await lyricSearch(text);
+
+    await sendText(
+      chat,
+      result
     );
+
+    return true;
   }
 
-  // ========================================
+  // ===================================================
   // DOWNLOAD
-  // ========================================
+  // ===================================================
+
+  const downloadCommands = [
+    "tiktok",
+    "tiktoknowm",
+    "tiktokwm",
+    "igdl",
+    "igreel",
+    "instagram",
+    "facebook",
+    "ytmp3",
+    "ytmp4"
+  ];
 
   if (
-    [
-      "tiktok",
-      "tiktoknowm",
-      "tiktokwm",
-      "igdl",
-      "igreel",
-      "instagram",
-      "facebook",
-      "ytmp3",
-      "ytmp4"
-    ].includes(command)
+    downloadCommands.includes(command)
   ) {
     const url =
-      extractUrl(
-        args.join(" ")
-      );
+      extractUrl(text);
 
     if (!url) {
-      return reply(
-        `Contoh:\n${PREFIX}${command} https://contoh.com/video`
+      await sendText(
+        chat,
+        `❌ Masukkan URL.\n\nContoh:\n${PREFIX}${command} https://contoh.com/video`
       );
+
+      return true;
     }
 
-    return reply(
-      `🔗 *LINK DITERIMA*\n\n` +
-      `${url}\n\n` +
-      `⚠️ Downloader otomatis belum terhubung ke provider/API downloader.\n\n` +
-      `Untuk mengirim file video/audio secara otomatis, ` +
-      `fitur ini perlu dihubungkan ke API downloader.`
+    await sendText(
+      chat,
+      `⏳ URL diterima:\n${url}\n\n⚠️ Downloader ${command} belum dikonfigurasi dengan API downloader.`
     );
+
+    return true;
   }
 
-  // ========================================
+  // ===================================================
   // STICKER
-  // ========================================
+  // ===================================================
 
   if (
     command === "sticker" ||
     command === "s"
   ) {
-    const image =
-      await getImageBuffer(
-        message,
-        false
-      ) ||
-      await getImageBuffer(
-        message,
-        true
-      );
+    const msg =
+      message?.message;
 
-    if (!image) {
-      return reply(
-        `🖼️ Kirim atau reply gambar dengan caption:\n` +
-        `${PREFIX}sticker`
-      );
-    }
+    const imageMessage =
+      msg?.imageMessage;
 
-    try {
-      const sticker =
-        await makeStaticSticker(
-          image
-        );
-
-      return sock.sendMessage(
-        chat,
-        {
-          sticker
-        }
-      );
-    } catch (error) {
-      return reply(
-        `❌ Gagal membuat sticker:\n${error.message}`
-      );
-    }
-  }
-
-  if (command === "toimg") {
     const quoted =
-      getQuotedMessage(
-        message
-      );
+      msg?.extendedTextMessage
+        ?.contextInfo
+        ?.quotedMessage;
+
+    let media = null;
+
+    if (imageMessage) {
+      media =
+        await downloadMedia(
+          imageMessage,
+          "image"
+        );
+    }
 
     if (
-      !quoted?.stickerMessage
+      !media &&
+      quoted?.imageMessage
     ) {
-      return reply(
-        `Reply sticker dengan:\n${PREFIX}toimg`
-      );
-    }
-
-    try {
-      const buffer =
+      media =
         await downloadMedia(
-          quoted.stickerMessage,
-          "sticker"
+          quoted.imageMessage,
+          "image"
         );
+    }
 
-      const image =
-        await sharp(buffer)
-          .png()
-          .toBuffer();
+    if (!media) {
+      await sendText(
+        chat,
+        "❌ Kirim atau reply gambar dengan perintah .sticker"
+      );
 
-      return sock.sendMessage(
+      return true;
+    }
+
+    const sticker =
+      await makeStaticSticker(
+        media
+      );
+
+    if (!sticker) {
+      await sendText(
+        chat,
+        "❌ Gagal membuat sticker."
+      );
+
+      return true;
+    }
+
+    try {
+      await sock.sendMessage(
         chat,
         {
-          image,
+          image: sticker,
           caption:
-            "✅ Sticker berhasil diubah menjadi gambar."
+            "⚠️ Sticker converter belum memakai encoder WebP."
         }
-      );
-    } catch (error) {
-      return reply(
-        `❌ Sticker tidak dapat dikonversi.\n${error.message}`
-      );
-    }
-  }
-
-  if (
-    [
-      "brat",
-      "ttp",
-      "attp"
-    ].includes(command)
-  ) {
-    const content =
-      args.join(" ").trim();
-
-    if (!content) {
-      return reply(
-        `Contoh:\n${PREFIX}${command} Zaza Store`
-      );
-    }
-
-    try {
-      let background =
-        "#ffffff";
-
-      let foreground =
-        "#111111";
-
-      if (
-        command === "brat"
-      ) {
-        background =
-          "#ffffff";
-      }
-
-      if (
-        command === "ttp"
-      ) {
-        background =
-          "#87ceeb";
-      }
-
-      if (
-        command === "attp"
-      ) {
-        background =
-          "#87ceeb";
-      }
-
-      const sticker =
-        await textSticker(
-          content,
-          background,
-          foreground
-        );
-
-      return sock.sendMessage(
-        chat,
-        {
-          sticker
-        }
-      );
-    } catch (error) {
-      return reply(
-        `❌ Gagal membuat sticker:\n${error.message}`
-      );
-    }
-  }
-
-  // ========================================
-  // TOOLS
-  // ========================================
-
-  if (command === "qr") {
-    const content =
-      args.join(" ").trim();
-
-    if (!content) {
-      return reply(
-        `Contoh:\n${PREFIX}qr Zaza Store`
-      );
-    }
-
-    try {
-      return await sendQR(
-        chat,
-        content
       );
     } catch {
-      return reply(
-        "❌ QR gagal dibuat."
+      await sendText(
+        chat,
+        "❌ Gagal mengirim media."
       );
     }
+
+    return true;
   }
+
+  // ===================================================
+  // TO IMAGE
+  // ===================================================
+
+  if (command === "toimg") {
+    await sendText(
+      chat,
+      "⚠️ Fitur .toimg membutuhkan converter WebP ke PNG."
+    );
+
+    return true;
+  }
+
+  // ===================================================
+  // BRAT
+  // ===================================================
+
+  if (command === "brat") {
+    if (!text) {
+      await sendText(
+        chat,
+        `Contoh:\n${PREFIX}brat Zaza Store`
+      );
+
+      return true;
+    }
+
+    await sendText(
+      chat,
+      `🖼️ Brat text:\n\n${text}\n\n⚠️ Generator Brat belum dikonfigurasi.`
+    );
+
+    return true;
+  }
+
+  // ===================================================
+  // TTP
+  // ===================================================
+
+  if (command === "ttp") {
+    if (!text) {
+      await sendText(
+        chat,
+        `Contoh:\n${PREFIX}ttp ZazaBot`
+      );
+
+      return true;
+    }
+
+    await sendText(
+      chat,
+      `📝 TTP:\n${text}\n\n⚠️ Generator sticker teks belum dikonfigurasi.`
+    );
+
+    return true;
+  }
+
+  // ===================================================
+  // ATTP
+  // ===================================================
+
+  if (command === "attp") {
+    if (!text) {
+      await sendText(
+        chat,
+        `Contoh:\n${PREFIX}attp ZazaBot`
+      );
+
+      return true;
+    }
+
+    await sendText(
+      chat,
+      `📝 ATTP:\n${text}\n\n⚠️ Generator animasi teks belum dikonfigurasi.`
+    );
+
+    return true;
+  }
+
+  // ===================================================
+  // QR
+  // ===================================================
+
+  if (command === "qr") {
+    if (!text) {
+      await sendText(
+        chat,
+        `Contoh:\n${PREFIX}qr https://google.com`
+      );
+
+      return true;
+    }
+
+    await sendQR(
+      chat,
+      text
+    );
+
+    return true;
+  }
+
+  // ===================================================
+  // SHORTLINK
+  // ===================================================
 
   if (command === "shortlink") {
     const url =
-      extractUrl(
-        args.join(" ")
-      );
+      extractUrl(text);
 
     if (!url) {
-      return reply(
+      await sendText(
+        chat,
         `Contoh:\n${PREFIX}shortlink https://google.com`
       );
+
+      return true;
     }
 
-    try {
-      const short =
-        await tinyUrl(url);
+    const result =
+      await tinyUrl(url);
 
-      return reply(
-        `🔗 *SHORTLINK*\n\n${short}`
-      );
-    } catch {
-      return reply(
-        "❌ Shortlink gagal dibuat."
-      );
-    }
+    await sendText(
+      chat,
+      `🔗 Shortlink:\n${result}`
+    );
+
+    return true;
   }
+
+  // ===================================================
+  // SCREENSHOT
+  // ===================================================
 
   if (command === "ss") {
-    const url =
-      extractUrl(
-        args.join(" ")
+    if (!text) {
+      await sendText(
+        chat,
+        `Contoh:\n${PREFIX}ss https://google.com`
       );
 
-    if (!url) {
-      return reply(
-        `Contoh:\n${PREFIX}ss https://example.com`
-      );
+      return true;
     }
 
-    return reply(
-      `🌐 URL:\n${url}\n\n` +
-      `⚠️ Screenshot website membutuhkan screenshot API/provider.`
+    await sendText(
+      chat,
+      `📸 Screenshot URL:\n${text}\n\n⚠️ Screenshot API belum dikonfigurasi.`
     );
+
+    return true;
   }
+
+  // ===================================================
+  // TOURl
+  // ===================================================
 
   if (command === "tourl") {
-    return reply(
-      `⚠️ ${PREFIX}tourl membutuhkan layanan upload file/provider agar media dapat diubah menjadi URL.`
+    await sendText(
+      chat,
+      "⚠️ Upload-to-URL belum dikonfigurasi."
     );
+
+    return true;
   }
+
+  // ===================================================
+  // REMOVE BG
+  // ===================================================
 
   if (command === "removebg") {
-    return reply(
-      `⚠️ ${PREFIX}removebg membutuhkan API Remove Background.`
+    await sendText(
+      chat,
+      "⚠️ Remove Background API belum dikonfigurasi."
     );
+
+    return true;
   }
+
+  // ===================================================
+  // OCR
+  // ===================================================
 
   if (command === "ocr") {
-    return reply(
-      `⚠️ ${PREFIX}ocr membutuhkan OCR provider/API.`
+    await sendText(
+      chat,
+      "⚠️ OCR belum dikonfigurasi."
     );
+
+    return true;
   }
 
-  // ========================================
-  // GROUP COMMAND CHECK
-  // ========================================
+  return false;
+}
 
-  const groupCommands = [
-    "absen",
-    "add",
-    "kick",
-    "promote",
-    "demote",
-    "tagall",
-    "hidetag",
-    "groupinfo",
-    "cekidgroup",
-    "linkgroup",
-    "setname",
-    "setdesc",
-    "welcome",
-    "welcomeoff",
-    "goodbye",
-    "goodbyeoff",
+// =====================================================
+// PART 4 LOADED
+// =====================================================
 
-    "antilink",
-    "antilinkoff",
-    "antilinknokick",
+console.log(
+  `${BOT_NAME} PART 4 loaded successfully.`
+);
+// =====================================================
+// ZAZABOT - PART 5
+// GROUP / ADMIN / SECURITY
+// =====================================================
 
-    "antibadword",
-    "antibadwordnokick",
+// =====================================================
+// GROUP COMMAND HANDLER
+// =====================================================
 
-    "antibot",
-    "antidelete",
-    "antimentionsw",
-    "antiviewonce",
+async function handleGroupCommand(
+  message,
+  command,
+  args,
+  text
+) {
+  const chat = getChat(message);
+  const sender = getSender(message);
 
-    "antiwame",
-    "antiwamenokick",
-    "antiluar",
-
-    "warn",
-    "unwarn",
-    "cekwarn",
-    "listwarn",
-    "resetwarn",
-
-    "tagadmin",
-    "listadmin"
-  ];
-
-  if (
-    groupCommands.includes(
-      command
-    )
-  ) {
-    if (
-      !needGroup(
-        chat,
-        reply
-      )
-    ) {
-      return;
-    }
-  }
-
-  // ========================================
+  // ===================================================
   // GROUP INFO
-  // ========================================
+  // ===================================================
 
-  if (
-    command === "groupinfo"
-  ) {
+  if (command === "groupinfo") {
+    if (!(await needGroup(message))) {
+      return true;
+    }
+
     const metadata =
-      await getGroupMetadata(
-        chat
-      );
+      await getGroupMetadata(chat);
 
     if (!metadata) {
-      return reply(
+      await sendText(
+        chat,
         "❌ Gagal mengambil informasi grup."
       );
+
+      return true;
     }
 
-    return reply(
-      `👥 *GROUP INFO*\n\n` +
-      `📛 Nama: ${metadata.subject}\n` +
-      `🆔 ID: ${chat}\n` +
-      `👤 Member: ${metadata.participants.length}\n` +
-      `📅 Dibuat: ${
-        metadata.creation
-          ? new Date(
-              metadata.creation * 1000
-            ).toLocaleString(
-              "id-ID"
-            )
-          : "-"
-      }`
+    const admins =
+      metadata.participants?.filter(
+        p =>
+          p.admin === "admin" ||
+          p.admin === "superadmin"
+      ) || [];
+
+    await sendText(
+      chat,
+      `╭━━━〔 👥 GROUP INFO 〕━━━╮
+┃
+┃ Nama    : ${metadata.subject || "-"}
+┃ ID      : ${chat}
+┃ Member  : ${metadata.participants?.length || 0}
+┃ Admin   : ${admins.length}
+┃
+╰━━━━━━━━━━━━━━━━━━╯`
     );
+
+    return true;
   }
 
-  if (
-    command === "cekidgroup"
-  ) {
-    return reply(
-      `🆔 *ID GROUP*\n\n${chat}`
+  // ===================================================
+  // GROUP ID
+  // ===================================================
+
+  if (command === "cekidgroup") {
+    if (!(await needGroup(message))) {
+      return true;
+    }
+
+    await sendText(
+      chat,
+      `🆔 ID Grup:\n\n${chat}`
     );
+
+    return true;
   }
 
-  if (
-    command === "linkgroup"
-  ) {
-    if (
-      !await needBotAdmin(
-        chat,
-        reply
-      )
-    ) {
-      return;
+  // ===================================================
+  // GROUP LINK
+  // ===================================================
+
+  if (command === "linkgroup") {
+    if (!(await needGroup(message))) {
+      return true;
+    }
+
+    if (!(await needBotAdmin(message))) {
+      return true;
     }
 
     try {
       const code =
-        await sock.groupInviteCode(
-          chat
-        );
+        await sock.groupInviteCode(chat);
 
-      return reply(
-        `🔗 *LINK GROUP*\n\n` +
-        `https://chat.whatsapp.com/${code}`
+      await sendText(
+        chat,
+        `🔗 Link Grup:\n\nhttps://chat.whatsapp.com/${code}`
       );
-    } catch {
-      return reply(
-        "❌ Gagal mengambil link grup."
+    } catch (error) {
+      await sendText(
+        chat,
+        "❌ Bot tidak dapat mengambil link grup."
       );
     }
+
+    return true;
   }
 
-  // ========================================
-  // ADMIN LIST
-  // ========================================
+  // ===================================================
+  // LIST ADMIN
+  // ===================================================
 
-  if (
-    command === "listadmin"
-  ) {
+  if (command === "listadmin") {
+    if (!(await needGroup(message))) {
+      return true;
+    }
+
     const metadata =
-      await getGroupMetadata(
-        chat
-      );
+      await getGroupMetadata(chat);
 
     if (!metadata) {
-      return reply(
-        "❌ Gagal mengambil data admin."
-      );
+      return true;
     }
 
     const admins =
-      metadata.participants.filter(
-        participant =>
-          participant.admin ===
-            "admin" ||
-          participant.admin ===
-            "superadmin"
-      );
+      metadata.participants?.filter(
+        p =>
+          p.admin === "admin" ||
+          p.admin === "superadmin"
+      ) || [];
 
     if (!admins.length) {
-      return reply(
+      await sendText(
+        chat,
         "❌ Admin tidak ditemukan."
       );
+
+      return true;
     }
 
-    const mentions =
-      admins.map(
-        participant =>
-          participant.id
-      );
+    let output =
+      "👑 *LIST ADMIN*\n\n";
 
-    const text =
-      admins
-        .map(
-          (participant, index) =>
-            `${index + 1}. @${jidNumber(
-              participant.id
-            )}`
-        )
-        .join("\n");
+    const mentions = [];
 
-    return reply(
-      `👮 *LIST ADMIN*\n\n${text}`,
+    admins.forEach(
+      (admin, index) => {
+        output +=
+          `${index + 1}. ${mentionUser(admin.id)}\n`;
+
+        mentions.push(admin.id);
+      }
+    );
+
+    await sendText(
+      chat,
+      output,
       {
         mentions
       }
     );
+
+    return true;
   }
 
-  if (
-    command === "tagadmin"
-  ) {
+  // ===================================================
+  // TAG ADMIN
+  // ===================================================
+
+  if (command === "tagadmin") {
+    if (!(await needGroup(message))) {
+      return true;
+    }
+
     const metadata =
-      await getGroupMetadata(
-        chat
-      );
+      await getGroupMetadata(chat);
 
     if (!metadata) {
-      return reply(
-        "❌ Gagal mengambil data admin."
-      );
+      return true;
     }
 
     const admins =
-      metadata.participants.filter(
-        participant =>
-          participant.admin ===
-            "admin" ||
-          participant.admin ===
-            "superadmin"
-      );
+      metadata.participants?.filter(
+        p =>
+          p.admin === "admin" ||
+          p.admin === "superadmin"
+      ) || [];
 
     const mentions =
       admins.map(
-        participant =>
-          participant.id
+        admin => admin.id
       );
 
-    return reply(
-      `📢 *ADMIN GROUP*\n\n` +
+    const textAdmin =
       admins
         .map(
-          participant =>
-            `@${jidNumber(
-              participant.id
-            )}`
+          admin =>
+            `@${jidNumber(admin.id)}`
         )
-        .join(" "),
+        .join(" ");
+
+    await sendText(
+      chat,
+      `📢 *PANGGIL ADMIN*\n\n${textAdmin}`,
       {
         mentions
       }
     );
+
+    return true;
   }
 
-  // ========================================
-  // WELCOME / GOODBYE
-  // ========================================
+  // ===================================================
+  // TAG ALL
+  // ===================================================
 
-  if (
-    [
-      "welcome",
-      "welcomeoff",
-      "goodbye",
-      "goodbyeoff"
-    ].includes(command)
-  ) {
-    if (
-      !await needAdmin(
-        chat,
-        sender,
-        reply
-      )
-    ) {
-      return;
+  if (command === "tagall") {
+    if (!(await needAdmin(message))) {
+      return true;
     }
 
-    const group =
-      getGroup(chat);
+    const metadata =
+      await getGroupMetadata(chat);
 
-    if (
-      command === "welcome"
-    ) {
-      group.welcome = true;
+    if (!metadata) {
+      return true;
     }
 
-    if (
-      command === "welcomeoff"
-    ) {
-      group.welcome = false;
-    }
+    const mentions =
+      metadata.participants
+        .map(p => p.id);
 
-    if (
-      command === "goodbye"
-    ) {
-      group.goodbye = true;
-    }
+    let output =
+      text ||
+      "📢 *TAG ALL*";
 
-    if (
-      command === "goodbyeoff"
-    ) {
-      group.goodbye = false;
-    }
+    output += "\n\n";
 
-    saveDB();
+    output +=
+      mentions
+        .map(
+          jid =>
+            `@${jidNumber(jid)}`
+        )
+        .join(" ");
 
-    return reply(
-      `✅ ${command} berhasil diatur.`
+    await sendText(
+      chat,
+      output,
+      {
+        mentions
+      }
     );
+
+    return true;
   }
-    // ========================================
-  // SECURITY
-  // ========================================
 
-  if (
-    [
-      "antilink",
-      "antilinkoff",
-      "antilinknokick"
-    ].includes(command)
-  ) {
-    if (
-      !await needAdmin(
-        chat,
-        sender,
-        reply
-      )
-    ) {
-      return;
+  // ===================================================
+  // HIDETAG
+  // ===================================================
+
+  if (command === "hidetag") {
+    if (!(await needAdmin(message))) {
+      return true;
     }
 
-    const group =
-      getGroup(chat);
+    const metadata =
+      await getGroupMetadata(chat);
 
-    if (
-      command === "antilink"
-    ) {
-      group.antilink = true;
-      group.antilinkKick = true;
+    if (!metadata) {
+      return true;
     }
 
-    if (
-      command === "antilinkoff"
-    ) {
-      group.antilink = false;
-    }
+    const mentions =
+      metadata.participants
+        .map(p => p.id);
 
-    if (
-      command === "antilinknokick"
-    ) {
-      group.antilink = true;
-      group.antilinkKick = false;
-    }
-
-    saveDB();
-
-    return reply(
-      `🛡️ *ANTILINK*\n\n` +
-      `Status: ${
-        group.antilink
-          ? "ON"
-          : "OFF"
-      }\n` +
-      `Kick: ${
-        group.antilinkKick
-          ? "ON"
-          : "OFF"
-      }`
+    await sendText(
+      chat,
+      text || "📢 Hidetag",
+      {
+        mentions
+      }
     );
+
+    return true;
   }
 
-  // ========================================
-  // ANTIBADWORD
-  // ========================================
+  // ===================================================
+  // ADD MEMBER
+  // ===================================================
 
-  if (
-    [
-      "antibadword",
-      "antibadwordnokick"
-    ].includes(command)
-  ) {
-    if (
-      !await needAdmin(
-        chat,
-        sender,
-        reply
-      )
-    ) {
-      return;
+  if (command === "add") {
+    if (!(await needAdmin(message))) {
+      return true;
     }
 
-    const group =
-      getGroup(chat);
-
-    group.antibadword =
-      true;
-
-    group.antibadwordKick =
-      command ===
-      "antibadword";
-
-    saveDB();
-
-    return reply(
-      `🛡️ *ANTIBADWORD*\n\n` +
-      `Status: ON\n` +
-      `Kick: ${
-        group.antibadwordKick
-          ? "ON"
-          : "OFF"
-      }`
-    );
-  }
-
-  // ========================================
-  // ADD BADWORD
-  // ========================================
-
-  if (
-    command === "addbadword"
-  ) {
-    if (
-      !await needAdmin(
-        chat,
-        sender,
-        reply
-      )
-    ) {
-      return;
+    if (!(await needBotAdmin(message))) {
+      return true;
     }
 
-    const word =
-      args.join(" ")
-        .trim()
-        .toLowerCase();
+    const number =
+      String(args[0] || "")
+        .replace(/\D/g, "");
 
-    if (!word) {
-      return reply(
-        `Contoh:\n${PREFIX}addbadword kata`
+    if (!number) {
+      await sendText(
+        chat,
+        `Contoh:\n${PREFIX}add 628xxxxxxxxxx`
+      );
+
+      return true;
+    }
+
+    try {
+      await sock.groupParticipantsUpdate(
+        chat,
+        [userJid(number)],
+        "add"
+      );
+
+      await sendText(
+        chat,
+        `✅ Berhasil mencoba menambahkan ${number}.`
+      );
+    } catch (error) {
+      await sendText(
+        chat,
+        `❌ Gagal menambahkan ${number}.`
       );
     }
 
-    const group =
-      getGroup(chat);
-
-    if (
-      !group.badwords.includes(
-        word
-      )
-    ) {
-      group.badwords.push(
-        word
-      );
-    }
-
-    saveDB();
-
-    return reply(
-      `✅ Kata terlarang berhasil ditambahkan:\n` +
-      `"${word}"`
-    );
+    return true;
   }
 
-  // ========================================
-  // ANTIBOT
-  // ========================================
+  // ===================================================
+  // KICK
+  // ===================================================
 
-  if (
-    command === "antibot"
-  ) {
-    if (
-      !await needAdmin(
-        chat,
-        sender,
-        reply
-      )
-    ) {
-      return;
+  if (command === "kick") {
+    if (!(await needAdmin(message))) {
+      return true;
     }
 
-    const group =
-      getGroup(chat);
-
-    group.antibot = true;
-
-    saveDB();
-
-    return reply(
-      "🤖 Antibot berhasil diaktifkan."
-    );
-  }
-
-  // ========================================
-  // ANTIDELETE
-  // ========================================
-
-  if (
-    command === "antidelete"
-  ) {
-    if (
-      !await needAdmin(
-        chat,
-        sender,
-        reply
-      )
-    ) {
-      return;
-    }
-
-    const group =
-      getGroup(chat);
-
-    group.antidelete = true;
-
-    saveDB();
-
-    return reply(
-      "🛡️ Antidelete berhasil diaktifkan."
-    );
-  }
-
-  // ========================================
-  // ANTIMENTIONSW
-  // ========================================
-
-  if (
-    command === "antimentionsw"
-  ) {
-    if (
-      !await needAdmin(
-        chat,
-        sender,
-        reply
-      )
-    ) {
-      return;
-    }
-
-    const group =
-      getGroup(chat);
-
-    group.antimentionsw =
-      true;
-
-    saveDB();
-
-    return reply(
-      "🛡️ Antimentionsw berhasil diaktifkan."
-    );
-  }
-
-  // ========================================
-  // ANTIVIEWONCE
-  // ========================================
-
-  if (
-    command === "antiviewonce"
-  ) {
-    if (
-      !await needAdmin(
-        chat,
-        sender,
-        reply
-      )
-    ) {
-      return;
-    }
-
-    const group =
-      getGroup(chat);
-
-    group.antiviewonce =
-      true;
-
-    saveDB();
-
-    return reply(
-      "🛡️ Antiviewonce berhasil diaktifkan."
-    );
-  }
-
-  // ========================================
-  // ANTIWAME
-  // ========================================
-
-  if (
-    command === "antiwame" ||
-    command === "antiwamenokick"
-  ) {
-    if (
-      !await needAdmin(
-        chat,
-        sender,
-        reply
-      )
-    ) {
-      return;
-    }
-
-    const group =
-      getGroup(chat);
-
-    group.antiwame =
-      true;
-
-    group.antiwameKick =
-      command === "antiwame";
-
-    saveDB();
-
-    return reply(
-      `🛡️ *ANTIWAME*\n\n` +
-      `Status: ON\n` +
-      `Kick: ${
-        group.antiwameKick
-          ? "ON"
-          : "OFF"
-      }`
-    );
-  }
-
-  // ========================================
-  // ANTILUAR
-  // ========================================
-
-  if (
-    command === "antiluar"
-  ) {
-    if (
-      !await needAdmin(
-        chat,
-        sender,
-        reply
-      )
-    ) {
-      return;
-    }
-
-    const group =
-      getGroup(chat);
-
-    group.antiluar =
-      true;
-
-    saveDB();
-
-    return reply(
-      "🛡️ Antiluar berhasil diaktifkan."
-    );
-  }
-
-  // ========================================
-  // ADD / KICK / PROMOTE / DEMOTE
-  // ========================================
-
-  if (
-    [
-      "add",
-      "kick",
-      "promote",
-      "demote"
-    ].includes(command)
-  ) {
-    if (
-      !await needAdmin(
-        chat,
-        sender,
-        reply
-      )
-    ) {
-      return;
-    }
-
-    if (
-      !await needBotAdmin(
-        chat,
-        reply
-      )
-    ) {
-      return;
+    if (!(await needBotAdmin(message))) {
+      return true;
     }
 
     const target =
@@ -3185,658 +2928,1148 @@ async function handleCommand(
       );
 
     if (!target) {
-      return reply(
-        `❌ Tag/reply nomor target.\n\n` +
-        `Contoh:\n` +
-        `${PREFIX}${command} @628xxxx`
+      await sendText(
+        chat,
+        "❌ Tag/reply member yang ingin dikeluarkan."
       );
+
+      return true;
     }
 
     try {
-      let action;
-
-      if (
-        command === "add"
-      ) {
-        action = "add";
-      }
-
-      if (
-        command === "kick"
-      ) {
-        action = "remove";
-      }
-
-      if (
-        command === "promote"
-      ) {
-        action = "promote";
-      }
-
-      if (
-        command === "demote"
-      ) {
-        action = "demote";
-      }
-
       await sock.groupParticipantsUpdate(
         chat,
         [target],
-        action
+        "remove"
       );
 
-      return reply(
-        `✅ Perintah *${command}* berhasil dijalankan untuk @${jidNumber(target)}.`,
+      await sendText(
+        chat,
+        `✅ ${mentionUser(target)} dikeluarkan.`,
         {
           mentions: [target]
         }
       );
-    } catch (error) {
-      return reply(
-        `❌ Gagal menjalankan ${command}.\n\n` +
-        `${error.message}`
+    } catch {
+      await sendText(
+        chat,
+        "❌ Gagal mengeluarkan member."
       );
     }
+
+    return true;
   }
 
-  // ========================================
-  // TAG ALL / HIDETAG
-  // ========================================
+  // ===================================================
+  // PROMOTE
+  // ===================================================
 
-  if (
-    command === "tagall" ||
-    command === "hidetag"
-  ) {
-    if (
-      !await needAdmin(
+  if (command === "promote") {
+    if (!(await needAdmin(message))) {
+      return true;
+    }
+
+    if (!(await needBotAdmin(message))) {
+      return true;
+    }
+
+    const target =
+      targetFromMessage(
+        message,
+        args
+      );
+
+    if (!target) {
+      await sendText(
         chat,
-        sender,
-        reply
-      )
-    ) {
-      return;
-    }
-
-    const metadata =
-      await getGroupMetadata(
-        chat
+        "❌ Tag/reply member."
       );
 
-    if (!metadata) {
-      return reply(
-        "❌ Gagal mengambil member grup."
+      return true;
+    }
+
+    try {
+      await sock.groupParticipantsUpdate(
+        chat,
+        [target],
+        "promote"
+      );
+
+      await sendText(
+        chat,
+        `👑 ${mentionUser(target)} sekarang menjadi admin.`,
+        {
+          mentions: [target]
+        }
+      );
+    } catch {
+      await sendText(
+        chat,
+        "❌ Gagal menjadikan admin."
       );
     }
 
-    const mentions =
-      metadata.participants
-        .map(
-          participant =>
-            participant.id
-        );
-
-    const messageText =
-      args.join(" ").trim() ||
-      "📢 Perhatian semua member!";
-
-    const tagged =
-      mentions
-        .map(
-          participant =>
-            `@${jidNumber(
-              participant
-            )}`
-        )
-        .join(" ");
-
-    return reply(
-      `${messageText}\n\n${tagged}`,
-      {
-        mentions
-      }
-    );
+    return true;
   }
 
-  // ========================================
-  // SET GROUP NAME
-  // ========================================
+  // ===================================================
+  // DEMOTE
+  // ===================================================
 
-  if (
-    command === "setname"
-  ) {
-    if (
-      !await needAdmin(
-        chat,
-        sender,
-        reply
-      )
-    ) {
-      return;
+  if (command === "demote") {
+    if (!(await needAdmin(message))) {
+      return true;
     }
 
-    if (
-      !await needBotAdmin(
-        chat,
-        reply
-      )
-    ) {
-      return;
+    if (!(await needBotAdmin(message))) {
+      return true;
     }
 
-    const name =
-      args.join(" ").trim();
+    const target =
+      targetFromMessage(
+        message,
+        args
+      );
 
-    if (!name) {
-      return reply(
+    if (!target) {
+      await sendText(
+        chat,
+        "❌ Tag/reply admin."
+      );
+
+      return true;
+    }
+
+    try {
+      await sock.groupParticipantsUpdate(
+        chat,
+        [target],
+        "demote"
+      );
+
+      await sendText(
+        chat,
+        `✅ ${mentionUser(target)} bukan admin lagi.`,
+        {
+          mentions: [target]
+        }
+      );
+    } catch {
+      await sendText(
+        chat,
+        "❌ Gagal menurunkan admin."
+      );
+    }
+
+    return true;
+  }
+
+  // ===================================================
+  // SET NAME
+  // ===================================================
+
+  if (command === "setname") {
+    if (!(await needAdmin(message))) {
+      return true;
+    }
+
+    if (!(await needBotAdmin(message))) {
+      return true;
+    }
+
+    if (!text) {
+      await sendText(
+        chat,
         `Contoh:\n${PREFIX}setname Zaza Store`
       );
+
+      return true;
     }
 
     try {
       await sock.groupUpdateSubject(
         chat,
-        name
+        text
       );
 
-      return reply(
-        `✅ Nama grup berhasil diubah menjadi:\n${name}`
+      await sendText(
+        chat,
+        "✅ Nama grup berhasil diubah."
       );
-    } catch (error) {
-      return reply(
-        `❌ Gagal mengubah nama grup.\n${error.message}`
+    } catch {
+      await sendText(
+        chat,
+        "❌ Gagal mengubah nama grup."
       );
     }
+
+    return true;
   }
 
-  // ========================================
-  // SET GROUP DESCRIPTION
-  // ========================================
+  // ===================================================
+  // SET DESCRIPTION
+  // ===================================================
 
-  if (
-    command === "setdesc"
-  ) {
-    if (
-      !await needAdmin(
-        chat,
-        sender,
-        reply
-      )
-    ) {
-      return;
+  if (command === "setdesc") {
+    if (!(await needAdmin(message))) {
+      return true;
     }
 
-    if (
-      !await needBotAdmin(
-        chat,
-        reply
-      )
-    ) {
-      return;
+    if (!(await needBotAdmin(message))) {
+      return true;
     }
 
-    const description =
-      args.join(" ").trim();
-
-    if (!description) {
-      return reply(
+    if (!text) {
+      await sendText(
+        chat,
         `Contoh:\n${PREFIX}setdesc Grup Zaza Store`
       );
+
+      return true;
     }
 
     try {
       await sock.groupUpdateDescription(
         chat,
-        description
+        text
       );
 
-      return reply(
+      await sendText(
+        chat,
         "✅ Deskripsi grup berhasil diubah."
       );
-    } catch (error) {
-      return reply(
-        `❌ Gagal mengubah deskripsi grup.\n${error.message}`
+    } catch {
+      await sendText(
+        chat,
+        "❌ Gagal mengubah deskripsi grup."
       );
     }
+
+    return true;
   }
 
-  // ========================================
-  // WARN SYSTEM
-  // ========================================
+  // ===================================================
+  // WELCOME
+  // ===================================================
 
-  if (
-    [
-      "warn",
-      "unwarn",
-      "cekwarn",
-      "listwarn",
-      "resetwarn"
-    ].includes(command)
-  ) {
-    if (
-      !await needAdmin(
-        chat,
-        sender,
-        reply
-      )
-    ) {
-      return;
+  if (command === "welcome") {
+    if (!(await needAdmin(message))) {
+      return true;
     }
 
     const group =
       getGroup(chat);
 
-    // --------------------------------------
-    // WARN
-    // --------------------------------------
-
-    if (
-      command === "warn"
-    ) {
-      const target =
-        targetFromMessage(
-          message,
-          args
-        );
-
-      if (!target) {
-        return reply(
-          `❌ Tag/reply target.\n\n` +
-          `Contoh:\n` +
-          `${PREFIX}warn @628xxxx`
-        );
-      }
-
-      const number =
-        jidNumber(target);
-
-      if (
-        !group.warnings[number]
-      ) {
-        group.warnings[number] =
-          0;
-      }
-
-      group.warnings[number]++;
-
-      const count =
-        group.warnings[number];
-
-      const targetUser =
-        getUser(target);
-
-      targetUser.warn =
-        count;
-
-      saveDB();
-
-      if (
-        count >= 3
-      ) {
-        if (
-          await isBotAdmin(chat)
-        ) {
-          try {
-            await sock.groupParticipantsUpdate(
-              chat,
-              [target],
-              "remove"
-            );
-
-            group.warnings[number] =
-              0;
-
-            targetUser.warn =
-              0;
-
-            saveDB();
-
-            return reply(
-              `🚫 @${number} mendapatkan 3/3 warn dan dikeluarkan dari grup.`,
-              {
-                mentions: [target]
-              }
-            );
-          } catch {}
-        }
-      }
-
-      return reply(
-        `⚠️ *WARNING*\n\n` +
-        `👤 @${number}\n` +
-        `Warn: ${count}/3`,
-        {
-          mentions: [target]
-        }
-      );
-    }
-
-    // --------------------------------------
-    // UNWARN
-    // --------------------------------------
-
-    if (
-      command === "unwarn"
-    ) {
-      const target =
-        targetFromMessage(
-          message,
-          args
-        );
-
-      if (!target) {
-        return reply(
-          `❌ Tag/reply target.\n\n` +
-          `Contoh:\n` +
-          `${PREFIX}unwarn @628xxxx`
-        );
-      }
-
-      const number =
-        jidNumber(target);
-
-      group.warnings[number] =
-        Math.max(
-          0,
-          (group.warnings[number] ||
-            0) - 1
-        );
-
-      getUser(target).warn =
-        group.warnings[number];
-
-      saveDB();
-
-      return reply(
-        `✅ Warn @${number} dikurangi.\n` +
-        `Warn sekarang: ${group.warnings[number]}/3`,
-        {
-          mentions: [target]
-        }
-      );
-    }
-
-    // --------------------------------------
-    // CEK WARN
-    // --------------------------------------
-
-    if (
-      command === "cekwarn"
-    ) {
-      const target =
-        targetFromMessage(
-          message,
-          args
-        ) || sender;
-
-      const number =
-        jidNumber(target);
-
-      const count =
-        group.warnings[number] ||
-        getUser(target).warn ||
-        0;
-
-      return reply(
-        `⚠️ *WARN USER*\n\n` +
-        `👤 @${number}\n` +
-        `Warn: ${count}/3`,
-        {
-          mentions: [target]
-        }
-      );
-    }
-
-    // --------------------------------------
-    // LIST WARN
-    // --------------------------------------
-
-    if (
-      command === "listwarn"
-    ) {
-      const entries =
-        Object.entries(
-          group.warnings
-        )
-        .filter(
-          ([, count]) =>
-            count > 0
-        );
-
-      if (!entries.length) {
-        return reply(
-          "✅ Tidak ada member yang memiliki warn."
-        );
-      }
-
-      const mentions =
-        entries.map(
-          ([number]) =>
-            userJid(number)
-        );
-
-      const list =
-        entries
-          .map(
-            ([number, count], index) =>
-              `${index + 1}. @${number} — ${count}/3`
-          )
-          .join("\n");
-
-      return reply(
-        `⚠️ *LIST WARN*\n\n${list}`,
-        {
-          mentions
-        }
-      );
-    }
-
-    // --------------------------------------
-    // RESET WARN
-    // --------------------------------------
-
-    if (
-      command === "resetwarn"
-    ) {
-      const target =
-        targetFromMessage(
-          message,
-          args
-        );
-
-      if (!target) {
-        return reply(
-          `❌ Tag/reply target.\n\n` +
-          `Contoh:\n` +
-          `${PREFIX}resetwarn @628xxxx`
-        );
-      }
-
-      const number =
-        jidNumber(target);
-
-      group.warnings[number] =
-        0;
-
-      getUser(target).warn =
-        0;
-
-      saveDB();
-
-      return reply(
-        `✅ Warn @${number} berhasil direset.`,
-        {
-          mentions: [target]
-        }
-      );
-    }
-}
-    // ========================================
-  // LIST & REMINDER
-  // ========================================
-
-  if (command === "addlist") {
-    const name =
-      args.shift();
-
-    const content =
-      args.join(" ").trim();
-
-    if (!name || !content) {
-      return reply(
-        `Contoh:\n${PREFIX}addlist menu Harga produk`
-      );
-    }
-
-    const group =
-      getGroup(chat);
-
-    group.lists ||= {};
-
-    group.lists[name] =
-      content;
+    group.welcome =
+      args[0] === "off"
+        ? false
+        : true;
 
     saveDB();
 
-    return reply(
-      `✅ List *${name}* berhasil ditambahkan.\n\n` +
-      `📝 Isi:\n${content}`
+    await sendText(
+      chat,
+      group.welcome
+        ? "✅ Welcome aktif."
+        : "❌ Welcome nonaktif."
     );
+
+    return true;
+  }
+
+  // ===================================================
+  // GOODBYE
+  // ===================================================
+
+  if (command === "goodbye") {
+    if (!(await needAdmin(message))) {
+      return true;
+    }
+
+    const group =
+      getGroup(chat);
+
+    group.goodbye =
+      args[0] === "off"
+        ? false
+        : true;
+
+    saveDB();
+
+    await sendText(
+      chat,
+      group.goodbye
+        ? "✅ Goodbye aktif."
+        : "❌ Goodbye nonaktif."
+    );
+
+    return true;
+  }
+
+  // ===================================================
+  // ANTILINK
+  // ===================================================
+
+  if (command === "antilink") {
+    if (!(await needAdmin(message))) {
+      return true;
+    }
+
+    const group =
+      getGroup(chat);
+
+    group.antilink = true;
+
+    if (args[0] === "nokick") {
+      group.antilinkKick = false;
+    } else {
+      group.antilinkKick = true;
+    }
+
+    saveDB();
+
+    await sendText(
+      chat,
+      group.antilinkKick
+        ? "✅ Antilink aktif + kick."
+        : "✅ Antilink aktif tanpa kick."
+    );
+
+    return true;
+  }
+
+  // ===================================================
+  // ANTILINK OFF
+  // ===================================================
+
+  if (command === "antilinkoff") {
+    if (!(await needAdmin(message))) {
+      return true;
+    }
+
+    const group =
+      getGroup(chat);
+
+    group.antilink = false;
+
+    saveDB();
+
+    await sendText(
+      chat,
+      "❌ Antilink dimatikan."
+    );
+
+    return true;
+  }
+
+  // ===================================================
+  // ANTILINK NOKICK
+  // ===================================================
+
+  if (command === "antilinknokick") {
+    if (!(await needAdmin(message))) {
+      return true;
+    }
+
+    const group =
+      getGroup(chat);
+
+    group.antilink = true;
+    group.antilinkKick = false;
+
+    saveDB();
+
+    await sendText(
+      chat,
+      "✅ Antilink aktif tanpa kick."
+    );
+
+    return true;
+  }
+
+  // ===================================================
+  // ANTIBADWORD
+  // ===================================================
+
+  if (command === "antibadword") {
+    if (!(await needAdmin(message))) {
+      return true;
+    }
+
+    const group =
+      getGroup(chat);
+
+    group.antibadword = true;
+
+    group.antibadwordKick =
+      args[0] !== "nokick";
+
+    saveDB();
+
+    await sendText(
+      chat,
+      group.antibadwordKick
+        ? "✅ Antibadword aktif + kick."
+        : "✅ Antibadword aktif tanpa kick."
+    );
+
+    return true;
+  }
+
+  // ===================================================
+  // ADD BADWORD
+  // ===================================================
+
+  if (command === "addbadword") {
+    if (!(await needAdmin(message))) {
+      return true;
+    }
+
+    if (!text) {
+      await sendText(
+        chat,
+        `Contoh:\n${PREFIX}addbadword kata1 kata2`
+      );
+
+      return true;
+    }
+
+    const group =
+      getGroup(chat);
+
+    const words =
+      text
+        .split(/\s+/)
+        .map(cleanText)
+        .filter(Boolean);
+
+    for (const word of words) {
+      if (!group.badwords.includes(word)) {
+        group.badwords.push(word);
+      }
+    }
+
+    saveDB();
+
+    await sendText(
+      chat,
+      `✅ ${words.length} kata berhasil ditambahkan.`
+    );
+
+    return true;
+  }
+
+  // ===================================================
+  // ANTIBOT
+  // ===================================================
+
+  if (command === "antibot") {
+    if (!(await needAdmin(message))) {
+      return true;
+    }
+
+    const group =
+      getGroup(chat);
+
+    group.antibot =
+      args[0] !== "off";
+
+    saveDB();
+
+    await sendText(
+      chat,
+      group.antibot
+        ? "✅ Antibot aktif."
+        : "❌ Antibot nonaktif."
+    );
+
+    return true;
+  }
+
+  // ===================================================
+  // ANTIDELETE
+  // ===================================================
+
+  if (command === "antidelete") {
+    if (!(await needAdmin(message))) {
+      return true;
+    }
+
+    const group =
+      getGroup(chat);
+
+    group.antidelete =
+      args[0] !== "off";
+
+    saveDB();
+
+    await sendText(
+      chat,
+      group.antidelete
+        ? "✅ Antidelete aktif."
+        : "❌ Antidelete nonaktif."
+    );
+
+    return true;
+  }
+
+  // ===================================================
+  // ANTIMENTIONSW
+  // ===================================================
+
+  if (command === "antimentionsw") {
+    if (!(await needAdmin(message))) {
+      return true;
+    }
+
+    const group =
+      getGroup(chat);
+
+    group.antimentionsw =
+      args[0] !== "off";
+
+    saveDB();
+
+    await sendText(
+      chat,
+      group.antimentionsw
+        ? "✅ Anti mention aktif."
+        : "❌ Anti mention nonaktif."
+    );
+
+    return true;
+  }
+
+  // ===================================================
+  // ANTIVIEWONCE
+  // ===================================================
+
+  if (command === "antiviewonce") {
+    if (!(await needAdmin(message))) {
+      return true;
+    }
+
+    const group =
+      getGroup(chat);
+
+    group.antiviewonce =
+      args[0] !== "off";
+
+    saveDB();
+
+    await sendText(
+      chat,
+      group.antiviewonce
+        ? "✅ Antiviewonce aktif."
+        : "❌ Antiviewonce nonaktif."
+    );
+
+    return true;
+  }
+
+  // ===================================================
+  // ANTIWAME
+  // ===================================================
+
+  if (command === "antiwame") {
+    if (!(await needAdmin(message))) {
+      return true;
+    }
+
+    const group =
+      getGroup(chat);
+
+    group.antiwame = true;
+    group.antiwameKick =
+      args[0] !== "nokick";
+
+    saveDB();
+
+    await sendText(
+      chat,
+      group.antiwameKick
+        ? "✅ Antiwa.me aktif + kick."
+        : "✅ Antiwa.me aktif tanpa kick."
+    );
+
+    return true;
+  }
+
+  // ===================================================
+  // ANTIWAME NOKICK
+  // ===================================================
+
+  if (command === "antiwamenokick") {
+    if (!(await needAdmin(message))) {
+      return true;
+    }
+
+    const group =
+      getGroup(chat);
+
+    group.antiwame = true;
+    group.antiwameKick = false;
+
+    saveDB();
+
+    await sendText(
+      chat,
+      "✅ Antiwa.me aktif tanpa kick."
+    );
+
+    return true;
+  }
+
+  // ===================================================
+  // ANTILUAR
+  // ===================================================
+
+  if (command === "antiluar") {
+    if (!(await needAdmin(message))) {
+      return true;
+    }
+
+    const group =
+      getGroup(chat);
+
+    group.antiluar =
+      args[0] !== "off";
+
+    saveDB();
+
+    await sendText(
+      chat,
+      group.antiluar
+        ? "✅ Antiluar aktif."
+        : "❌ Antiluar nonaktif."
+    );
+
+    return true;
+  }
+
+  return false;
+}
+
+// =====================================================
+// PART 5 LOADED
+// =====================================================
+
+console.log(
+  `${BOT_NAME} PART 5 loaded successfully.`
+);
+// =====================================================
+// ZAZABOT - PART 6
+// WARNING / LIST / REMINDER / GAME
+// =====================================================
+
+// =====================================================
+// WARNING SYSTEM
+// =====================================================
+
+async function handleWarningCommand(
+  message,
+  command,
+  args
+) {
+  const chat = getChat(message);
+
+  if (command === "warn") {
+    if (!(await needAdmin(message))) {
+      return true;
+    }
+
+    const target =
+      targetFromMessage(
+        message,
+        args
+      );
+
+    if (!target) {
+      await sendText(
+        chat,
+        "❌ Tag atau reply member yang ingin diberi warn."
+      );
+
+      return true;
+    }
+
+    const count =
+      addWarning(
+        chat,
+        target
+      );
+
+    await sendText(
+      chat,
+      `⚠️ ${mentionUser(target)} mendapat WARN.\n\nJumlah warn: ${count}/3`,
+      {
+        mentions: [target]
+      }
+    );
+
+    if (count >= 3) {
+      if (await isBotAdmin(chat)) {
+        try {
+          await sock.groupParticipantsUpdate(
+            chat,
+            [target],
+            "remove"
+          );
+
+          const group =
+            getGroup(chat);
+
+          group.warnings[
+            jidNumber(target)
+          ] = 0;
+
+          saveDB();
+
+          await sendText(
+            chat,
+            `🚫 ${mentionUser(target)} telah dikeluarkan karena mencapai 3 warn.`,
+            {
+              mentions: [target]
+            }
+          );
+        } catch {
+          await sendText(
+            chat,
+            "❌ Warn sudah mencapai 3, tetapi bot gagal mengeluarkan member."
+          );
+        }
+      }
+    }
+
+    return true;
+  }
+
+  if (command === "unwarn") {
+    if (!(await needAdmin(message))) {
+      return true;
+    }
+
+    const target =
+      targetFromMessage(
+        message,
+        args
+      );
+
+    const count =
+      removeWarning(
+        chat,
+        target
+      );
+
+    await sendText(
+      chat,
+      `✅ Warn ${mentionUser(target)} dikurangi.\n\nJumlah warn: ${count}/3`,
+      {
+        mentions: [target]
+      }
+    );
+
+    return true;
+  }
+
+  if (command === "cekwarn") {
+    const target =
+      targetFromMessage(
+        message,
+        args
+      );
+
+    const group =
+      getGroup(chat);
+
+    const count =
+      Number(
+        group.warnings[
+          jidNumber(target)
+        ] || 0
+      );
+
+    await sendText(
+      chat,
+      `⚠️ Warn ${mentionUser(target)}: ${count}/3`,
+      {
+        mentions: [target]
+      }
+    );
+
+    return true;
+  }
+
+  if (command === "listwarn") {
+    if (!(await needGroup(message))) {
+      return true;
+    }
+
+    const group =
+      getGroup(chat);
+
+    const entries =
+      Object.entries(
+        group.warnings
+      ).filter(
+        ([, count]) =>
+          Number(count) > 0
+      );
+
+    if (!entries.length) {
+      await sendText(
+        chat,
+        "✅ Tidak ada member yang memiliki warn."
+      );
+
+      return true;
+    }
+
+    let output =
+      "⚠️ *LIST WARN*\n\n";
+
+    for (
+      let i = 0;
+      i < entries.length;
+      i++
+    ) {
+      const [
+        number,
+        count
+      ] = entries[i];
+
+      output +=
+        `${i + 1}. @${number} — ${count}/3\n`;
+    }
+
+    await sendText(
+      chat,
+      output,
+      {
+        mentions:
+          entries.map(
+            ([number]) =>
+              userJid(number)
+          )
+      }
+    );
+
+    return true;
+  }
+
+  if (command === "resetwarn") {
+    if (!(await needAdmin(message))) {
+      return true;
+    }
+
+    const group =
+      getGroup(chat);
+
+    group.warnings = {};
+
+    saveDB();
+
+    await sendText(
+      chat,
+      "✅ Semua warn grup telah direset."
+    );
+
+    return true;
+  }
+
+  return false;
+}
+
+// =====================================================
+// LIST SYSTEM
+// =====================================================
+
+async function handleListCommand(
+  message,
+  command,
+  args,
+  text
+) {
+  const chat = getChat(message);
+
+  if (command === "addlist") {
+    if (!(await needAdmin(message))) {
+      return true;
+    }
+
+    if (!text) {
+      await sendText(
+        chat,
+        `Contoh:\n${PREFIX}addlist harga|Rp10.000`
+      );
+
+      return true;
+    }
+
+    const parts =
+      text.split("|");
+
+    const name =
+      String(parts[0] || "")
+        .trim();
+
+    const value =
+      String(parts.slice(1).join("|") || "")
+        .trim();
+
+    if (!name || !value) {
+      await sendText(
+        chat,
+        "❌ Format salah."
+      );
+
+      return true;
+    }
+
+    const group =
+      getGroup(chat);
+
+    if (!group.lists) {
+      group.lists = {};
+    }
+
+    group.lists[name] = value;
+
+    saveDB();
+
+    await sendText(
+      chat,
+      `✅ List berhasil ditambahkan.\n\n📌 ${name}\n📝 ${value}`
+    );
+
+    return true;
   }
 
   if (
     command === "updatelist" ||
     command === "uplist"
   ) {
-    const name =
-      args.shift();
+    if (!(await needAdmin(message))) {
+      return true;
+    }
 
-    const content =
-      args.join(" ").trim();
-
-    if (!name || !content) {
-      return reply(
-        `Contoh:\n${PREFIX}${command} menu Isi baru`
+    if (!text) {
+      await sendText(
+        chat,
+        `Contoh:\n${PREFIX}updatelist harga|Rp20.000`
       );
+
+      return true;
+    }
+
+    const parts =
+      text.split("|");
+
+    const name =
+      String(parts[0] || "")
+        .trim();
+
+    const value =
+      String(parts.slice(1).join("|") || "")
+        .trim();
+
+    const group =
+      getGroup(chat);
+
+    if (
+      !group.lists ||
+      !group.lists[name]
+    ) {
+      await sendText(
+        chat,
+        "❌ List tersebut belum ada."
+      );
+
+      return true;
+    }
+
+    group.lists[name] =
+      value;
+
+    saveDB();
+
+    await sendText(
+      chat,
+      `✅ List ${name} berhasil diperbarui.`
+    );
+
+    return true;
+  }
+
+  if (command === "list") {
+    if (!(await needGroup(message))) {
+      return true;
     }
 
     const group =
       getGroup(chat);
 
-    group.lists ||= {};
-
-    if (
-      !group.lists[name]
-    ) {
-      return reply(
-        `❌ List *${name}* belum tersedia.`
+    const entries =
+      Object.entries(
+        group.lists || {}
       );
+
+    if (!entries.length) {
+      await sendText(
+        chat,
+        "📋 List masih kosong."
+      );
+
+      return true;
     }
 
-    group.lists[name] =
-      content;
+    let output =
+      "📋 *LIST GRUP*\n\n";
 
-    saveDB();
+    for (const [
+      name,
+      value
+    ] of entries) {
+      output +=
+        `• ${name}: ${value}\n`;
+    }
 
-    return reply(
-      `✅ List *${name}* berhasil diperbarui.\n\n` +
-      `📝 Isi baru:\n${content}`
+    await sendText(
+      chat,
+      output
     );
+
+    return true;
   }
 
-  // ========================================
-  // ADD POINT
-  // ========================================
+  return false;
+}
 
-  if (
-    command === "addpoin"
-  ) {
+// =====================================================
+// POINT SYSTEM
+// =====================================================
+
+async function handlePointCommand(
+  message,
+  command,
+  args
+) {
+  const chat = getChat(message);
+  const sender = getSender(message);
+
+  if (command === "addpoin") {
+    if (!(await needAdmin(message))) {
+      return true;
+    }
+
     const target =
       targetFromMessage(
         message,
         args
-      ) || sender;
+      );
 
     const amount =
       Number(
         args.find(
-          item =>
-            /^\d+$/.test(item)
+          x => /^\d+$/.test(x)
         ) || 1
+      );
+
+    addPoint(
+      target,
+      amount
+    );
+
+    await sendText(
+      chat,
+      `🏆 ${mentionUser(target)} mendapat +${amount} poin.`,
+      {
+        mentions: [target]
+      }
+    );
+
+    return true;
+  }
+
+  if (command === "cekpoint") {
+    const target =
+      targetFromMessage(
+        message,
+        args
       );
 
     const targetUser =
       getUser(target);
 
-    targetUser.points =
-      (targetUser.points || 0) +
-      amount;
-
-    saveDB();
-
-    return reply(
-      `⭐ *POIN DITAMBAHKAN*\n\n` +
-      `👤 @${jidNumber(target)}\n` +
-      `⭐ +${amount} poin\n` +
-      `📊 Total: ${targetUser.points}`,
+    await sendText(
+      chat,
+      `🏆 Poin ${mentionUser(target)}: ${targetUser.points}`,
       {
         mentions: [target]
       }
     );
+
+    return true;
   }
 
-  // ========================================
-  // REMINDER / ALARM
-  // ========================================
+  return false;
+}
+
+// =====================================================
+// REMINDER
+// =====================================================
+
+async function handleReminderCommand(
+  message,
+  command,
+  args,
+  text
+) {
+  const chat = getChat(message);
+  const sender = getSender(message);
 
   if (
     command === "addreminder" ||
     command === "addalarm"
   ) {
+    const durationText =
+      args[0];
+
     const duration =
       parseDuration(
-        args[0] || ""
+        durationText
       );
 
-    const reminderText =
-      args
-        .slice(1)
-        .join(" ")
-        .trim();
-
-    if (
-      !duration ||
-      !reminderText
-    ) {
-      return reply(
-        `❌ Format salah.\n\n` +
-        `Contoh:\n` +
-        `${PREFIX}${command} 10m minum air\n\n` +
-        `Format waktu:\n` +
-        `10m = 10 menit\n` +
-        `1h = 1 jam\n` +
-        `1d = 1 hari`
+    if (!duration) {
+      await sendText(
+        chat,
+        `Contoh:\n${PREFIX}addreminder 10m belajar`
       );
+
+      return true;
     }
 
+    const reminderText =
+      args.slice(1).join(" ") ||
+      "Reminder";
+
     const group =
-      getGroup(chat);
+      isGroup(chat)
+        ? getGroup(chat)
+        : null;
 
-    const reminder = {
-      id: randomId("REM"),
-      user:
-        jidNumber(sender),
-      text:
-        reminderText,
-      createdAt:
-        Date.now(),
-      duration
-    };
+    if (group) {
+      if (!group.reminders) {
+        group.reminders = [];
+      }
 
-    group.reminders ||= [];
-
-    group.reminders.push(
-      reminder
-    );
+      group.reminders.push({
+        id: randomId(6),
+        user: sender,
+        text: reminderText,
+        time: Date.now() + duration
+      });
+    }
 
     saveDB();
 
@@ -3845,261 +4078,236 @@ async function handleCommand(
         try {
           await sendText(
             chat,
-            `⏰ *REMINDER*\n\n` +
-            `👤 @${jidNumber(sender)}\n` +
-            `📝 ${reminderText}`,
+            `⏰ *REMINDER*\n\n@${jidNumber(sender)}\n\n${reminderText}`,
             {
               mentions: [sender]
             }
           );
-        } catch {}
+        } catch {
+          // ignore
+        }
       },
       duration
     );
 
-    return reply(
-      `✅ Reminder berhasil dibuat.\n\n` +
-      `🆔 ${reminder.id}\n` +
-      `⏰ Waktu: ${args[0]}\n` +
-      `📝 ${reminderText}`
+    await sendText(
+      chat,
+      `⏰ Reminder dibuat.\n\n📝 ${reminderText}\n⏱️ ${durationText}`
     );
+
+    return true;
   }
 
-  // ========================================
-  // AFK
-  // ========================================
+  if (command === "createschedulecall") {
+    await sendText(
+      chat,
+      "📅 Fitur schedule call akan ditambahkan pada modul berikutnya."
+    );
+
+    return true;
+  }
+
+  if (command === "cekschedule") {
+    const group =
+      isGroup(chat)
+        ? getGroup(chat)
+        : null;
+
+    const reminders =
+      group?.reminders || [];
+
+    if (!reminders.length) {
+      await sendText(
+        chat,
+        "📅 Tidak ada schedule aktif."
+      );
+
+      return true;
+    }
+
+    let output =
+      "📅 *SCHEDULE*\n\n";
+
+    for (const reminder of reminders) {
+      output +=
+        `• ${reminder.text}\n`;
+    }
+
+    await sendText(
+      chat,
+      output
+    );
+
+    return true;
+  }
+
+  return false;
+}
+
+// =====================================================
+// AFK
+// =====================================================
+
+async function handleAfkCommand(
+  message,
+  command,
+  args,
+  text
+) {
+  const chat = getChat(message);
+  const sender = getSender(message);
 
   if (command === "afk") {
-    const reason =
-      args.join(" ").trim() ||
-      "AFK";
+    const user =
+      getUser(sender);
 
     user.afk = {
-      reason,
-      since: Date.now()
+      reason:
+        text ||
+        "AFK",
+      time: Date.now()
     };
 
     saveDB();
 
-    return reply(
-      `💤 *AFK AKTIF*\n\n` +
-      `Alasan: ${reason}\n\n` +
-      `Kirim pesan lagi untuk menonaktifkan AFK.`
-    );
-  }
-
-  // ========================================
-  // SCHEDULE
-  // ========================================
-
-  if (
-    command === "createschedulecall"
-  ) {
-    const time =
-      args[0];
-
-    const scheduleText =
-      args
-        .slice(1)
-        .join(" ")
-        .trim();
-
-    if (
-      !time ||
-      !scheduleText
-    ) {
-      return reply(
-        `📅 *CREATE SCHEDULE CALL*\n\n` +
-        `Contoh:\n` +
-        `${PREFIX}createschedulecall 20:00 Meeting`
-      );
-    }
-
-    return reply(
-      `✅ Schedule call dibuat.\n\n` +
-      `⏰ Waktu: ${time}\n` +
-      `📝 Acara: ${scheduleText}`
-    );
-  }
-
-  if (
-    command === "cekabsen"
-  ) {
-    const group =
-      getGroup(chat);
-
-    group.absen ||= {
-      active: false,
-      members: {}
-    };
-
-    const members =
-      Object.entries(
-        group.absen.members
-      );
-
-    if (!members.length) {
-      return reply(
-        "📋 Belum ada data absensi."
-      );
-    }
-
-    const list =
-      members
-        .map(
-          ([number, value], index) =>
-            `${index + 1}. @${number} — ${value}`
-        )
-        .join("\n");
-
-    return reply(
-      `📋 *DATA ABSENSI*\n\n${list}`,
+    await sendText(
+      chat,
+      `💤 @${jidNumber(sender)} sekarang AFK.\n\nAlasan: ${text || "AFK"}`,
       {
-        mentions:
-          members.map(
-            ([number]) =>
-              userJid(number)
-          )
+        mentions: [sender]
       }
     );
+
+    return true;
   }
 
-  if (
-    command === "cekpoint"
-  ) {
-    return reply(
-      `⭐ *POIN KAMU*\n\n` +
-      `Total poin: ${user.points || 0}`
-    );
-  }
+  return false;
+}
 
-  if (
-    command === "cekschedule"
-  ) {
-    return reply(
-      `📅 *SCHEDULE*\n\n` +
-      `Belum ada schedule aktif.`
-    );
-  }
+// =====================================================
+// GAME COMMAND
+// =====================================================
 
-  // ========================================
-  // SIMPLE GAMES
-  // ========================================
+async function handleGameCommand(
+  message,
+  command,
+  args
+) {
+  const chat = getChat(message);
+  const sender = getSender(message);
+
+  // ---------------------------------------------------
+  // ASAH OTAK
+  // ---------------------------------------------------
 
   if (
     command === "asahotak" ||
     command === "tebak"
   ) {
-    const item =
-      riddles[
-        Math.floor(
-          Math.random() *
-          riddles.length
-        )
-      ];
+    if (gameSessions.has(chat)) {
+      await sendText(
+        chat,
+        "🎮 Masih ada game yang sedang berjalan.\nGunakan .stopgame terlebih dahulu."
+      );
+
+      return true;
+    }
+
+    const game =
+      randomRiddle();
 
     startGame(
       chat,
-      item[0],
-      item[1],
-      "riddle"
+      sender,
+      "riddle",
+      game
     );
 
-    return reply(
-      `🧠 *ASAH OTAK*\n\n` +
-      `${item[0]}\n\n` +
-      `💡 Jawab langsung dengan teks.\n` +
-      `🛑 Ketik ${PREFIX}stopgame untuk berhenti.`
+    await sendText(
+      chat,
+      `🧠 *ASAH OTAK*\n\n${game.question}\n\nJawab langsung di chat.`
     );
+
+    return true;
   }
+
+  // ---------------------------------------------------
+  // TEBAK KATA
+  // ---------------------------------------------------
 
   if (
     command === "tebakkata" ||
     command === "susunkata"
   ) {
-    const item =
-      wordGames[
-        Math.floor(
-          Math.random() *
-          wordGames.length
-        )
-      ];
+    if (gameSessions.has(chat)) {
+      await sendText(
+        chat,
+        "🎮 Masih ada game yang berjalan."
+      );
 
-    const shuffled =
-      item[0]
-        .split("")
-        .sort(
-          () =>
-            Math.random() -
-            0.5
-        )
-        .join("");
+      return true;
+    }
+
+    const game =
+      randomWordGame();
 
     startGame(
       chat,
-      `Susun huruf: ${shuffled}`,
-      item[1],
-      "word"
+      sender,
+      "word",
+      game
     );
 
-    return reply(
-      `🔤 *TEBAK KATA*\n\n` +
-      `Susun huruf berikut:\n\n` +
-      `🔀 *${shuffled}*\n\n` +
-      `Jawab dengan kata yang benar.`
+    await sendText(
+      chat,
+      `🔤 *TEBAK KATA*\n\n${game.question}\n\nJawab langsung di chat.`
     );
+
+    return true;
   }
 
-  if (
-    command === "math"
-  ) {
-    const a =
-      Math.floor(
-        Math.random() * 20
-      ) + 1;
+  // ---------------------------------------------------
+  // MATH
+  // ---------------------------------------------------
 
-    const b =
-      Math.floor(
-        Math.random() * 20
-      ) + 1;
+  if (command === "math") {
+    if (gameSessions.has(chat)) {
+      await sendText(
+        chat,
+        "🎮 Masih ada game yang berjalan."
+      );
 
-    const addition =
-      Math.random() > 0.5;
+      return true;
+    }
 
-    const operator =
-      addition
-        ? "+"
-        : "-";
-
-    const answer =
-      addition
-        ? a + b
-        : a - b;
+    const game =
+      createMathQuestion();
 
     startGame(
       chat,
-      `${a} ${operator} ${b} = ?`,
-      String(answer),
-      "math"
+      sender,
+      "math",
+      game
     );
 
-    return reply(
-      `🧮 *MATH GAME*\n\n` +
-      `Berapa hasil dari:\n\n` +
-      `*${a} ${operator} ${b} = ?*\n\n` +
-      `Jawab dengan angka.`
+    await sendText(
+      chat,
+      `➗ *MATH GAME*\n\n${game.question}`
     );
+
+    return true;
   }
 
-  if (
-    command === "truth"
-  ) {
+  // ---------------------------------------------------
+  // TRUTH
+  // ---------------------------------------------------
+
+  if (command === "truth") {
     const questions = [
-      "Apa hal yang paling kamu takutkan?",
-      "Apa kebiasaan burukmu?",
-      "Apa hal paling memalukan yang pernah kamu alami?",
-      "Siapa orang yang paling kamu percaya?",
-      "Apa cita-cita terbesar kamu?"
+      "Apa hal paling memalukan yang pernah kamu lakukan?",
+      "Siapa orang yang paling sering kamu chat?",
+      "Apa cita-cita kamu?",
+      "Apa kebiasaan burukmu?"
     ];
 
     const question =
@@ -4110,20 +4318,24 @@ async function handleCommand(
         )
       ];
 
-    return reply(
+    await sendText(
+      chat,
       `🎯 *TRUTH*\n\n${question}`
     );
+
+    return true;
   }
 
-  if (
-    command === "dare"
-  ) {
+  // ---------------------------------------------------
+  // DARE
+  // ---------------------------------------------------
+
+  if (command === "dare") {
     const dares = [
-      "Kirim emoji yang paling sering kamu gunakan.",
-      "Tag satu teman di grup.",
-      "Kirim pesan dengan huruf kapital semua.",
-      "Kirim satu GIF lucu.",
-      "Kirim foto makanan terakhir yang kamu makan."
+      "Kirim emoji favoritmu 10 kali.",
+      "Kirim stiker terakhir yang kamu gunakan.",
+      "Tulis 'ZazaBot keren' 5 kali.",
+      "Kirim foto profilmu."
     ];
 
     const dare =
@@ -4134,275 +4346,348 @@ async function handleCommand(
         )
       ];
 
-    return reply(
+    await sendText(
+      chat,
       `🔥 *DARE*\n\n${dare}`
     );
+
+    return true;
   }
 
-  if (
-    command === "caklontong"
-  ) {
-    return reply(
-      `😂 *CAK LONTONG*\n\n` +
-      `Database soal Cak Lontong belum dipasang.\n` +
-      `Tambahkan dataset soal untuk mengaktifkan permainan lengkap.`
-    );
-  }
+  // ---------------------------------------------------
+  // CAKLONTONG
+  // ---------------------------------------------------
 
-  if (
-    command === "family100"
-  ) {
-    return reply(
-      `👨‍👩‍👧‍👦 *FAMILY 100*\n\n` +
-      `Database Family 100 belum dipasang.\n` +
-      `Tambahkan dataset soal untuk mengaktifkan permainan lengkap.`
-    );
-  }
+  if (command === "caklontong") {
+    if (gameSessions.has(chat)) {
+      await sendText(
+        chat,
+        "🎮 Masih ada game yang berjalan."
+      );
 
-  if (
-    command === "akinator"
-  ) {
-    return reply(
-      `🔮 *AKINATOR*\n\n` +
-      `Game Akinator membutuhkan API/game engine khusus.`
-    );
-  }
-
-  if (
-    command === "tebakgambar"
-  ) {
-    return reply(
-      `🖼️ *TEBAK GAMBAR*\n\n` +
-      `Database gambar belum dipasang.`
-    );
-  }
-
-  if (
-    command === "stopgame"
-  ) {
-    stopGame(chat);
-
-    return reply(
-      "🛑 Game berhasil dihentikan."
-    );
-  }
-
-  // ========================================
-  // INFO
-  // ========================================
-
-  if (
-    command === "ceksewa"
-  ) {
-    return reply(
-      `ℹ️ *STATUS SEWA*\n\n` +
-      `Bot tidak menggunakan sistem sewa bawaan pada versi ini.`
-    );
-  }
-
-  if (
-    command === "ceksewabyid"
-  ) {
-    return reply(
-      `ℹ️ *CEK SEWA BY ID*\n\n` +
-      `Sistem sewa belum diaktifkan.`
-    );
-  }
-
-  if (
-    command === "dbinfo"
-  ) {
-    if (
-      !needOwner(
-        sender,
-        reply
-      )
-    ) {
-      return;
+      return true;
     }
 
-    return reply(
-      `🗄️ *DATABASE INFO*\n\n` +
-      `👤 Users: ${
-        Object.keys(
-          db.users
-        ).length
-      }\n` +
-      `👥 Groups: ${
-        Object.keys(
-          db.groups
-        ).length
-      }\n` +
-      `📦 Orders: ${
-        Object.keys(
-          db.orders
-        ).length
-      }\n` +
-      `🚫 Banned: ${
-        db.banned.length
-      }\n` +
-      `💬 Messages: ${
-        db.stats.messages
-      }\n` +
-      `⚡ Commands: ${
-        db.stats.commands
-      }`
+    const games = [
+      {
+        question:
+          "Hewan apa yang paling sederhana?",
+        answer:
+          "ikan"
+      },
+      {
+        question:
+          "Apa yang dipakai untuk melihat?",
+        answer:
+          "mata"
+      },
+      {
+        question:
+          "Apa lawan kata panas?",
+        answer:
+          "dingin"
+      }
+    ];
+
+    const game =
+      games[
+        Math.floor(
+          Math.random() *
+          games.length
+        )
+      ];
+
+    startGame(
+      chat,
+      sender,
+      "caklontong",
+      game
     );
+
+    await sendText(
+      chat,
+      `😂 *CAKLONTONG*\n\n${game.question}`
+    );
+
+    return true;
   }
 
-  // ========================================
-  // COMMAND NOT FOUND
-  // ========================================
+  // ---------------------------------------------------
+  // FAMILY 100
+  // ---------------------------------------------------
 
-  return reply(
-    `❓ Command *${command}* belum memiliki handler khusus.\n\n` +
-    `Ketik ${PREFIX}menu untuk melihat daftar command.`
-  );
-          }
-// ============================================================
-// PART 7/10 — GROUP SECURITY, GAME, AFK, PARTICIPANTS
-// ============================================================
+  if (command === "family100") {
+    await sendText(
+      chat,
+      `👨‍👩‍👧‍👦 *FAMILY 100*\n\nSebutkan benda yang biasanya ada di kamar tidur.\n\n⚠️ Mode sederhana.`
+    );
 
-async function handleGroupSecurity(m, text) {
-  const chat = getChat(m);
-  const sender = getSender(m);
+    return true;
+  }
 
-  if (!isGroup(chat)) return false;
+  // ---------------------------------------------------
+  // AKINATOR
+  // ---------------------------------------------------
+
+  if (command === "akinator") {
+    await sendText(
+      chat,
+      "🔮 Akinator membutuhkan sistem pertanyaan khusus. Modul ini belum diaktifkan."
+    );
+
+    return true;
+  }
+
+  // ---------------------------------------------------
+  // TEBAK GAMBAR
+  // ---------------------------------------------------
+
+  if (command === "tebakgambar") {
+    await sendText(
+      chat,
+      "🖼️ Tebak gambar belum memiliki database gambar."
+    );
+
+    return true;
+  }
+
+  // ---------------------------------------------------
+  // STOP GAME
+  // ---------------------------------------------------
+
+  if (command === "stopgame") {
+    const stopped =
+      stopGame(chat);
+
+    await sendText(
+      chat,
+      stopped
+        ? "🛑 Game dihentikan."
+        : "❌ Tidak ada game yang sedang berjalan."
+    );
+
+    return true;
+  }
+
+  return false;
+}
+
+// =====================================================
+// GENERAL GROUP INFO
+// =====================================================
+
+async function handleGroupInfoCommand(
+  message,
+  command
+) {
+  const chat = getChat(message);
+
+  if (command === "ceksewa") {
+    await sendText(
+      chat,
+      "📦 Status sewa bot:\n\nℹ️ Sistem sewa belum diaktifkan."
+    );
+
+    return true;
+  }
+
+  if (command === "ceksewabyid") {
+    await sendText(
+      chat,
+      `📦 ID Grup:\n${chat}\n\nℹ️ Sistem sewa belum diaktifkan.`
+    );
+
+    return true;
+  }
+
+  if (command === "dbinfo") {
+    if (!(await needOwner(message))) {
+      return true;
+    }
+
+    await sendText(
+      chat,
+      `🗄️ *DATABASE INFO*\n\nUsers: ${Object.keys(db.users).length}\nGroups: ${Object.keys(db.groups).length}\nBanned: ${db.banned.length}\nPremium: ${Object.keys(db.premium).length}\nOrders: ${Object.keys(db.orders || {}).length}`
+    );
+
+    return true;
+  }
+
+  return false;
+}
+
+// =====================================================
+// PART 6 LOADED
+// =====================================================
+
+console.log(
+  `${BOT_NAME} PART 6 loaded successfully.`
+);
+// =====================================================
+// ZAZABOT - PART 7
+// AUTO SECURITY / AFK / GAME / PARTICIPANTS
+// =====================================================
+
+// =====================================================
+// GROUP SECURITY
+// =====================================================
+
+async function handleGroupSecurity(message, text) {
+  const chat = getChat(message);
+  const sender = getSender(message);
+
+  if (!isGroup(chat)) {
+    return false;
+  }
 
   const group = getGroup(chat);
 
-  // Owner tidak terkena sistem keamanan
-  if (isOwner(sender)) return false;
+  // Owner dan admin grup tidak terkena security otomatis
+  if (
+    isOwner(sender) ||
+    await isGroupAdmin(chat, sender)
+  ) {
+    return false;
+  }
 
-  const lower = String(text || "").toLowerCase();
+  const lowerText = String(text || "").toLowerCase();
 
-  // ----------------------------------------------------------
-  // ANTI LINK GROUP WHATSAPP
-  // ----------------------------------------------------------
+  // ===================================================
+  // ANTI LINK WHATSAPP / GROUP LINK
+  // ===================================================
 
   if (
     group.antilink &&
     (
-      lower.includes("chat.whatsapp.com/") ||
-      lower.includes("whatsapp.com/channel/")
+      lowerText.includes("chat.whatsapp.com/") ||
+      lowerText.includes("whatsapp.com/channel/")
     )
   ) {
-    await react(m, "⚠️");
-
     try {
-      await sock.sendMessage(chat, {
-        delete: m.key
-      });
-    } catch {}
+      await sock.sendMessage(
+        chat,
+        {
+          delete: message.key
+        }
+      );
+    } catch {
+      // abaikan jika bot tidak bisa menghapus
+    }
 
-    if (group.antilinkKick && await isBotAdmin(chat)) {
+    await sendText(
+      chat,
+      `⚠️ @${jidNumber(sender)} terdeteksi mengirim link WhatsApp.`,
+      {
+        mentions: [sender]
+      }
+    );
+
+    if (
+      group.antilinkKick &&
+      await isBotAdmin(chat)
+    ) {
       try {
         await sock.groupParticipantsUpdate(
           chat,
           [sender],
           "remove"
         );
-
-        await sendText(
-          chat,
-          `🚫 @${jidNumber(sender)} dikeluarkan karena mengirim link WhatsApp.`,
-          [sender]
-        );
       } catch {
-        await sendText(
-          chat,
-          `⚠️ @${jidNumber(sender)} terdeteksi mengirim link WhatsApp.`,
-          [sender]
-        );
+        // abaikan
       }
-    } else {
-      await sendText(
-        chat,
-        `⚠️ @${jidNumber(sender)} jangan mengirim link WhatsApp di grup.`,
-        [sender]
-      );
     }
 
     return true;
   }
 
-  // ----------------------------------------------------------
+  // ===================================================
   // ANTI WA.ME
-  // ----------------------------------------------------------
+  // ===================================================
 
   if (
     group.antiwame &&
     (
-      lower.includes("wa.me/") ||
-      lower.includes("api.whatsapp.com/send")
+      lowerText.includes("wa.me/") ||
+      lowerText.includes("wa.link/")
     )
   ) {
-    await react(m, "⚠️");
-
     try {
-      await sock.sendMessage(chat, {
-        delete: m.key
-      });
-    } catch {}
+      await sock.sendMessage(
+        chat,
+        {
+          delete: message.key
+        }
+      );
+    } catch {
+      // abaikan
+    }
 
-    if (group.antiwameKick && await isBotAdmin(chat)) {
+    await sendText(
+      chat,
+      `⚠️ @${jidNumber(sender)} tidak diperbolehkan mengirim link wa.me.`,
+      {
+        mentions: [sender]
+      }
+    );
+
+    if (
+      group.antiwameKick &&
+      await isBotAdmin(chat)
+    ) {
       try {
         await sock.groupParticipantsUpdate(
           chat,
           [sender],
           "remove"
         );
-
-        await sendText(
-          chat,
-          `🚫 @${jidNumber(sender)} dikeluarkan karena mengirim link WhatsApp.`,
-          [sender]
-        );
       } catch {
-        await sendText(
-          chat,
-          `⚠️ @${jidNumber(sender)} terdeteksi mengirim link WhatsApp.`,
-          [sender]
-        );
+        // abaikan
       }
-    } else {
-      await sendText(
-        chat,
-        `⚠️ @${jidNumber(sender)} jangan mengirim link WhatsApp.`,
-        [sender]
-      );
     }
 
     return true;
   }
 
-  // ----------------------------------------------------------
+  // ===================================================
   // ANTI BADWORD
-  // ----------------------------------------------------------
+  // ===================================================
 
   if (
     group.antibadword &&
     Array.isArray(group.badwords) &&
-    group.badwords.length > 0
+    group.badwords.length
   ) {
-    const found = group.badwords.some(word => {
-      const cleanWord = String(word || "")
-        .toLowerCase()
-        .trim();
+    const cleaned =
+      cleanText(lowerText);
 
-      if (!cleanWord) return false;
-
-      return lower.includes(cleanWord);
-    });
+    const found =
+      group.badwords.find(
+        word =>
+          word &&
+          cleaned.includes(
+            cleanText(word)
+          )
+      );
 
     if (found) {
-      await react(m, "🤬");
-
       try {
-        await sock.sendMessage(chat, {
-          delete: m.key
-        });
-      } catch {}
+        await sock.sendMessage(
+          chat,
+          {
+            delete: message.key
+          }
+        );
+      } catch {
+        // abaikan
+      }
+
+      await sendText(
+        chat,
+        `⚠️ @${jidNumber(sender)} terdeteksi menggunakan kata terlarang.`,
+        {
+          mentions: [sender]
+        }
+      );
 
       if (
         group.antibadwordKick &&
@@ -4414,25 +4699,9 @@ async function handleGroupSecurity(m, text) {
             [sender],
             "remove"
           );
-
-          await sendText(
-            chat,
-            `🚫 @${jidNumber(sender)} dikeluarkan karena menggunakan kata terlarang.`,
-            [sender]
-          );
         } catch {
-          await sendText(
-            chat,
-            `⚠️ @${jidNumber(sender)} gunakan bahasa yang sopan.`,
-            [sender]
-          );
+          // abaikan
         }
-      } else {
-        await sendText(
-          chat,
-          `⚠️ @${jidNumber(sender)} gunakan bahasa yang sopan.`,
-          [sender]
-        );
       }
 
       return true;
@@ -4442,460 +4711,653 @@ async function handleGroupSecurity(m, text) {
   return false;
 }
 
+// =====================================================
+// GAME ANSWER
+// =====================================================
 
-// ============================================================
-// HANDLE JAWABAN GAME
-// ============================================================
+async function handleGameAnswer(
+  message,
+  text
+) {
+  const chat = getChat(message);
+  const sender = getSender(message);
 
-async function handleGameAnswer(m, text) {
-  const chat = getChat(m);
-  const sender = getSender(m);
+  const session =
+    gameSessions.get(chat);
 
-  if (!chat || !sender) return false;
-
-  const session = gameSessions[chat];
-
-  if (!session) return false;
-
-  // Jangan proses command sebagai jawaban game
-  if (String(text || "").startsWith(PREFIX)) {
+  if (!session) {
     return false;
   }
 
-  const answer = cleanText(text);
-
-  if (!answer) return false;
-
-  const correct = session.answer;
-
+  // Hanya pemain yang memulai game
   if (
-    answer === cleanText(correct) ||
-    answer.includes(cleanText(correct))
+    session.player &&
+    session.player !== sender
   ) {
-    const user = getUser(sender);
+    return false;
+  }
 
-    user.points += 5;
-    user.limit += 1;
+  const answer =
+    cleanText(
+      session.data?.answer || ""
+    );
 
-    stopGame(chat);
+  const userAnswer =
+    cleanText(text);
 
-    await react(m, "✅");
+  if (!answer || !userAnswer) {
+    return false;
+  }
+
+  if (userAnswer === answer) {
+    const user =
+      getUser(sender);
+
+    user.points =
+      Number(user.points || 0) + 5;
+
+    user.limit =
+      Number(user.limit || 0) + 1;
+
+    gameSessions.delete(chat);
+
+    saveDB();
 
     await sendText(
       chat,
-      `🎉 *JAWABAN BENAR!*\n\n` +
-      `👤 @${jidNumber(sender)}\n` +
-      `💡 Jawaban: *${correct}*\n` +
-      `🏆 +5 poin\n` +
-      `🎁 +1 limit`,
-      [sender]
+      `🎉 *BENAR!*\n\nJawaban: ${session.data.answer}\n\n🏆 +5 poin\n🎁 +1 limit`
     );
-
-    saveDB();
 
     return true;
   }
 
+  // Jawaban salah tidak menghapus game
   return false;
 }
 
+// =====================================================
+// AFK SYSTEM
+// =====================================================
 
-// ============================================================
-// HANDLE AFK
-// ============================================================
+async function handleAfk(
+  message,
+  text
+) {
+  const chat = getChat(message);
+  const sender = getSender(message);
 
-async function handleAfk(m, text) {
-  const chat = getChat(m);
-  const sender = getSender(m);
-
-  if (!isGroup(chat)) return false;
-
-  const user = getUser(sender);
-
-  // ----------------------------------------------------------
-  // USER KEMBALI DARI AFK
-  // ----------------------------------------------------------
-
-  if (user.afk) {
-    const afkData = user.afk;
-
-    user.afk = null;
-
-    const elapsed = Date.now() - afkData.time;
-
-    await sendText(
-      chat,
-      `👋 @${jidNumber(sender)} sudah kembali!\n` +
-      `⏱️ AFK selama ${formatRuntime(elapsed)}.`,
-      [sender]
-    );
-  }
-
-  // ----------------------------------------------------------
-  // CEK ORANG YANG DI-MENTION DAN SEDANG AFK
-  // ----------------------------------------------------------
-
-  const mentioned =
-    m.message?.extendedTextMessage?.contextInfo?.mentionedJid ||
-    [];
-
-  if (!Array.isArray(mentioned) || mentioned.length === 0) {
+  if (!chat || !sender) {
     return false;
   }
 
-  for (const jid of mentioned) {
-    const target = getUser(jid);
+  const user =
+    getUser(sender);
 
-    if (!target.afk) continue;
+  // ===================================================
+  // USER KEMBALI DARI AFK
+  // ===================================================
 
-    const elapsed = Date.now() - target.afk.time;
+  if (
+    user?.afk &&
+    user.afk.time
+  ) {
+    const duration =
+      Date.now() -
+      user.afk.time;
+
+    const reason =
+      user.afk.reason ||
+      "AFK";
+
+    user.afk = null;
+
+    saveDB();
 
     await sendText(
       chat,
-      `💤 @${jidNumber(jid)} sedang AFK.\n` +
-      `📝 Alasan: ${target.afk.reason || "Tidak ada alasan"}\n` +
-      `⏱️ Sejak: ${formatRuntime(elapsed)} yang lalu.`,
-      [jid]
+      `👋 @${jidNumber(sender)} sudah kembali!\n\n⏱️ AFK selama: ${formatRuntime(duration)}\n📝 Alasan: ${reason}`,
+      {
+        mentions: [sender]
+      }
     );
+  }
+
+  // ===================================================
+  // CEK MENTION USER AFK
+  // ===================================================
+
+  const mentioned =
+    message?.message
+      ?.extendedTextMessage
+      ?.contextInfo
+      ?.mentionedJid || [];
+
+  for (const jid of mentioned) {
+    const mentionedUser =
+      getUser(jid);
+
+    if (
+      mentionedUser?.afk &&
+      mentionedUser.afk.time
+    ) {
+      const duration =
+        Date.now() -
+        mentionedUser.afk.time;
+
+      await sendText(
+        chat,
+        `💤 @${jidNumber(jid)} sedang AFK.\n\n📝 Alasan: ${mentionedUser.afk.reason || "AFK"}\n⏱️ Selama: ${formatRuntime(duration)}`,
+        {
+          mentions: [jid]
+        }
+      );
+    }
   }
 
   return false;
 }
 
+// =====================================================
+// PARTICIPANT EVENTS
+// =====================================================
 
-// ============================================================
-// HANDLE MEMBER MASUK / KELUAR GRUP
-// ============================================================
+async function handleParticipants(
+  update
+) {
+  const {
+    id: groupId,
+    participants,
+    action
+  } = update;
 
-async function handleParticipants(update) {
-  try {
-    const chat = update.id;
-
-    if (!chat || !chat.endsWith("@g.us")) {
-      return;
-    }
-
-    const group = getGroup(chat);
-
-    if (!group) return;
-
-    const participants = update.participants || [];
-
-    if (!Array.isArray(participants)) return;
-
-    for (const participant of participants) {
-      const number = jidNumber(participant);
-
-      // ------------------------------------------------------
-      // MEMBER MASUK
-      // ------------------------------------------------------
-
-      if (update.action === "add") {
-        if (!group.welcome) continue;
-
-        await sendText(
-          chat,
-          `🎉 *WELCOME!*\n\n` +
-          `Selamat datang @${number} 👋\n` +
-          `Semoga betah di grup ini.\n\n` +
-          `📌 Jangan lupa baca rules grup ya!`,
-          [participant]
-        );
-      }
-
-      // ------------------------------------------------------
-      // MEMBER KELUAR
-      // ------------------------------------------------------
-
-      if (
-        update.action === "remove" ||
-        update.action === "leave"
-      ) {
-        if (!group.goodbye) continue;
-
-        await sendText(
-          chat,
-          `👋 Selamat tinggal @${number}.\n` +
-          `Semoga sukses selalu!`,
-          [participant]
-        );
-      }
-
-      // ------------------------------------------------------
-      // MEMBER DIPROMOTE
-      // ------------------------------------------------------
-
-      if (update.action === "promote") {
-        await sendText(
-          chat,
-          `👑 @${number} sekarang menjadi admin grup.`,
-          [participant]
-        );
-      }
-
-      // ------------------------------------------------------
-      // MEMBER DITURUNKAN
-      // ------------------------------------------------------
-
-      if (update.action === "demote") {
-        await sendText(
-          chat,
-          `📉 @${number} tidak lagi menjadi admin grup.`,
-          [participant]
-        );
-      }
-    }
-  } catch (error) {
-    console.log(
-      "handleParticipants error:",
-      error?.message || error
-    );
+  if (!groupId) {
+    return;
   }
-    }
-// ============================================================
-// PART 8/10 — HANDLE MESSAGE
-// ============================================================
 
-async function handleMessage(m) {
-  try {
-    if (!m || !m.message) return;
+  const group =
+    getGroup(groupId);
 
-    const chat = getChat(m);
-    const sender = getSender(m);
+  // ===================================================
+  // WELCOME
+  // ===================================================
 
-    if (!chat || !sender) return;
+  if (
+    action === "add" &&
+    group.welcome
+  ) {
+    const metadata =
+      await getGroupMetadata(
+        groupId
+      );
 
-    const text = getMessageText(m).trim();
+    const groupName =
+      metadata?.subject ||
+      "Grup";
 
-    // Abaikan pesan kosong
-    if (!text) return;
-
-    // Update statistik
-    db.stats.messages++;
-
-    // Pastikan user tersedia di database
-    const user = getUser(sender);
-
-    // --------------------------------------------------------
-    // CEK BAN
-    // --------------------------------------------------------
-
-    if (isBanned(sender)) {
-      return;
-    }
-
-    // --------------------------------------------------------
-    // MODE SELF
-    // --------------------------------------------------------
-
-    if (!publicMode && !isOwner(sender)) {
-      return;
-    }
-
-    // --------------------------------------------------------
-    // HANDLE AFK
-    // --------------------------------------------------------
-
-    try {
-      await handleAfk(m, text);
-    } catch (error) {
-      console.log(
-        "AFK handler error:",
-        error?.message || error
+    for (const jid of participants || []) {
+      await sendText(
+        groupId,
+        `╭━━━〔 👋 WELCOME 〕━━━╮
+┃
+┃ Selamat datang @${jidNumber(jid)}!
+┃
+┃ 👥 Grup: ${groupName}
+┃
+┃ Silakan baca deskripsi
+┃ dan patuhi peraturan grup.
+┃
+╰━━━━━━━━━━━━━━━━━━╯`,
+        {
+          mentions: [jid]
+        }
       );
     }
+  }
 
-    // --------------------------------------------------------
+  // ===================================================
+  // GOODBYE
+  // ===================================================
+
+  if (
+    (
+      action === "remove" ||
+      action === "leave"
+    ) &&
+    group.goodbye
+  ) {
+    for (const jid of participants || []) {
+      await sendText(
+        groupId,
+        `👋 @${jidNumber(jid)} telah keluar dari grup.`,
+        {
+          mentions: [jid]
+        }
+      );
+    }
+  }
+
+  // ===================================================
+  // PROMOTE
+  // ===================================================
+
+  if (action === "promote") {
+    for (const jid of participants || []) {
+      await sendText(
+        groupId,
+        `👑 Selamat @${jidNumber(jid)}, sekarang menjadi admin grup.`,
+        {
+          mentions: [jid]
+        }
+      );
+    }
+  }
+
+  // ===================================================
+  // DEMOTE
+  // ===================================================
+
+  if (action === "demote") {
+    for (const jid of participants || []) {
+      await sendText(
+        groupId,
+        `📢 @${jidNumber(jid)} tidak lagi menjadi admin.`,
+        {
+          mentions: [jid]
+        }
+      );
+    }
+  }
+}
+
+// =====================================================
+// PART 7 LOADED
+// =====================================================
+
+console.log(
+  `${BOT_NAME} PART 7 loaded successfully.`
+);
+// =====================================================
+// ZAZABOT - PART 8
+// MESSAGE HANDLER + COMMAND ROUTER + START BOT
+// =====================================================
+
+// =====================================================
+// PARSE COMMAND
+// =====================================================
+
+function parseCommand(text) {
+  if (!text) {
+    return null;
+  }
+
+  const value = String(text).trim();
+
+  if (!value.startsWith(PREFIX)) {
+    return null;
+  }
+
+  const body =
+    value.slice(PREFIX.length).trim();
+
+  if (!body) {
+    return null;
+  }
+
+  const parts =
+    body.split(/\s+/);
+
+  const command =
+    String(parts.shift())
+      .toLowerCase();
+
+  return {
+    command,
+    args: parts,
+    text: parts.join(" ")
+  };
+}
+
+// =====================================================
+// MAIN MESSAGE HANDLER
+// =====================================================
+
+async function handleMessage(message) {
+  try {
+    if (!message) {
+      return;
+    }
+
+    if (!message.message) {
+      return;
+    }
+
+    if (message.key?.fromMe) {
+      return;
+    }
+
+    const chat =
+      getChat(message);
+
+    const sender =
+      getSender(message);
+
+    if (!chat || !sender) {
+      return;
+    }
+
+    const text =
+      getMessageText(message);
+
+    if (!text) {
+      return;
+    }
+
+    // =================================================
+    // DATABASE USER
+    // =================================================
+
+    getUser(sender);
+
+    db.stats.messages =
+      Number(db.stats.messages || 0) + 1;
+
+    saveDB();
+
+    // =================================================
+    // BANNED USER
+    // =================================================
+
+    if (
+      isBanned(sender) &&
+      !isOwner(sender)
+    ) {
+      return;
+    }
+
+    // =================================================
+    // PUBLIC / SELF MODE
+    // =================================================
+
+    if (
+      !publicMode &&
+      !isOwner(sender)
+    ) {
+      return;
+    }
+
+    // =================================================
+    // AFK
+    // =================================================
+
+    await handleAfk(
+      message,
+      text
+    );
+
+    // =================================================
     // GROUP SECURITY
-    // --------------------------------------------------------
+    // =================================================
 
     if (isGroup(chat)) {
-      try {
-        const blocked = await handleGroupSecurity(
-          m,
+      const security =
+        await handleGroupSecurity(
+          message,
           text
         );
 
-        if (blocked) {
-          saveDB();
-          return;
-        }
-      } catch (error) {
-        console.log(
-          "Security handler error:",
-          error?.message || error
-        );
+      if (security) {
+        return;
       }
     }
 
-    // --------------------------------------------------------
-    // HANDLE JAWABAN GAME
-    // --------------------------------------------------------
+    // =================================================
+    // GAME ANSWER
+    // =================================================
 
-    try {
-      const gameAnswered = await handleGameAnswer(
-        m,
+    const gameAnswered =
+      await handleGameAnswer(
+        message,
         text
       );
 
-      if (gameAnswered) {
-        saveDB();
-        return;
-      }
-    } catch (error) {
-      console.log(
-        "Game handler error:",
-        error?.message || error
-      );
-    }
-
-    // --------------------------------------------------------
-    // CEK PREFIX
-    // --------------------------------------------------------
-
-    if (!text.startsWith(PREFIX)) {
-      saveDB();
+    if (gameAnswered) {
       return;
     }
 
-    // --------------------------------------------------------
-    // PARSING COMMAND
-    // --------------------------------------------------------
+    // =================================================
+    // COMMAND
+    // =================================================
 
-    const withoutPrefix = text
-      .slice(PREFIX.length)
-      .trim();
+    const parsed =
+      parseCommand(text);
 
-    if (!withoutPrefix) return;
+    if (!parsed) {
+      return;
+    }
 
-    const parts = withoutPrefix.split(/\s+/);
+    const {
+      command,
+      args,
+      text: commandText
+    } = parsed;
 
-    const command = String(parts.shift() || "")
-      .toLowerCase();
+    // =================================================
+    // PART 4
+    // SEARCH / DOWNLOAD / STICKER
+    // =================================================
 
-    const args = parts;
-
-    const commandText = args.join(" ").trim();
-
-    if (!command) return;
-
-    db.stats.commands++;
-
-    // --------------------------------------------------------
-    // REACTION LOADING
-    // --------------------------------------------------------
-
-    await react(m, "⏳");
-
-    // --------------------------------------------------------
-    // JALANKAN COMMAND
-    // --------------------------------------------------------
-
-    try {
-      await handleCommand(
-        m,
+    const part4 =
+      await handleCommandPart4(
+        message,
         command,
         args,
         commandText
       );
 
-      await react(m, "✅");
-    } catch (error) {
-      console.log(
-        `Command ${command} error:`,
-        error?.stack || error
-      );
-
-      await react(m, "❌");
-
-      await sendText(
-        chat,
-        `❌ Terjadi kesalahan saat menjalankan command.\n\n` +
-        `📌 Command: *${PREFIX}${command}*\n` +
-        `⚠️ Error: ${error?.message || "Unknown error"}`
-      );
+    if (part4) {
+      return;
     }
 
-    saveDB();
+    // =================================================
+    // GROUP COMMAND
+    // =================================================
+
+    const groupCommand =
+      await handleGroupCommand(
+        message,
+        command,
+        args,
+        commandText
+      );
+
+    if (groupCommand) {
+      return;
+    }
+
+    // =================================================
+    // WARNING
+    // =================================================
+
+    const warningCommand =
+      await handleWarningCommand(
+        message,
+        command,
+        args
+      );
+
+    if (warningCommand) {
+      return;
+    }
+
+    // =================================================
+    // LIST
+    // =================================================
+
+    const listCommand =
+      await handleListCommand(
+        message,
+        command,
+        args,
+        commandText
+      );
+
+    if (listCommand) {
+      return;
+    }
+
+    // =================================================
+    // POINT
+    // =================================================
+
+    const pointCommand =
+      await handlePointCommand(
+        message,
+        command,
+        args
+      );
+
+    if (pointCommand) {
+      return;
+    }
+
+    // =================================================
+    // REMINDER
+    // =================================================
+
+    const reminderCommand =
+      await handleReminderCommand(
+        message,
+        command,
+        args,
+        commandText
+      );
+
+    if (reminderCommand) {
+      return;
+    }
+
+    // =================================================
+    // AFK COMMAND
+    // =================================================
+
+    const afkCommand =
+      await handleAfkCommand(
+        message,
+        command,
+        args,
+        commandText
+      );
+
+    if (afkCommand) {
+      return;
+    }
+
+    // =================================================
+    // GAME COMMAND
+    // =================================================
+
+    const gameCommand =
+      await handleGameCommand(
+        message,
+        command,
+        args
+      );
+
+    if (gameCommand) {
+      return;
+    }
+
+    // =================================================
+    // GROUP INFO / SEWA
+    // =================================================
+
+    const groupInfoCommand =
+      await handleGroupInfoCommand(
+        message,
+        command
+      );
+
+    if (groupInfoCommand) {
+      return;
+    }
+
+    // =================================================
+    // MAIN COMMAND
+    // =================================================
+
+    await handleCommand(
+      message,
+      command,
+      args,
+      commandText
+    );
+
   } catch (error) {
-    console.log(
-      "handleMessage error:",
-      error?.stack || error
+    console.error(
+      "HANDLE MESSAGE ERROR:",
+      error
     );
   }
 }
 
-
-// ============================================================
+// =====================================================
 // START BOT
-// ============================================================
+// =====================================================
 
 async function startBot() {
   try {
-    console.log("========================================");
-    console.log("        ZAZABOT STARTING...");
-    console.log("========================================");
-
-    // --------------------------------------------------------
-    // PASTIKAN FOLDER SESSION ADA
-    // --------------------------------------------------------
-
-    if (!fs.existsSync(SESSION_DIR)) {
-      fs.mkdirSync(
-        SESSION_DIR,
-        {
-          recursive: true
-        }
+    if (sock) {
+      console.log(
+        "Bot sudah memiliki koneksi."
       );
     }
 
-    // --------------------------------------------------------
-    // AUTHENTICATION
-    // --------------------------------------------------------
+    fs.mkdirSync(
+      SESSION_DIR,
+      {
+        recursive: true
+      }
+    );
 
     const {
       state,
       saveCreds
-    } = await useMultiFileAuthState(
-      SESSION_DIR
-    );
+    } =
+      await useMultiFileAuthState(
+        SESSION_DIR
+      );
 
-    // --------------------------------------------------------
-    // BUAT SOCKET WHATSAPP
-    // --------------------------------------------------------
+    sock =
+      makeWASocket({
+        auth: state,
 
-    sock = makeWASocket({
-      auth: state,
+        logger:
+          pino({
+            level: "silent"
+          }),
 
-      logger: pino({
-        level: "silent"
-      }),
+        browser:
+          Browsers.ubuntu(
+            BOT_NAME
+          ),
 
-      browser: Browsers.ubuntu(
-        "Chrome"
-      ),
+        markOnlineOnConnect: false,
 
-      printQRInTerminal: false,
+        generateHighQualityLinkPreview: false
+      });
 
-      markOnlineOnConnect: false,
-
-      syncFullHistory: false,
-
-      generateHighQualityLinkPreview: true
-    });
-
-    // --------------------------------------------------------
-    // SIMPAN CREDS
-    // --------------------------------------------------------
+    // =================================================
+    // SAVE CREDENTIALS
+    // =================================================
 
     sock.ev.on(
       "creds.update",
       saveCreds
     );
 
-    // --------------------------------------------------------
+    // =================================================
     // CONNECTION UPDATE
-    // --------------------------------------------------------
+    // =================================================
 
     sock.ev.on(
       "connection.update",
@@ -4907,91 +5369,62 @@ async function startBot() {
             qr
           } = update;
 
-          // --------------------------------------------------
-          // QR CODE
-          // --------------------------------------------------
+          // ---------------------------------------------
+          // QR
+          // ---------------------------------------------
 
           if (qr) {
-            connectionStatus = "qr";
+            qrCode = qr;
 
-            try {
-              qrImage = await QRCode.toDataURL(
-                qr,
-                {
-                  width: 500,
-                  margin: 2
-                }
-              );
+            connectionStatus =
+              "qr";
 
-              console.log("");
-              console.log(
-                "========================================"
-              );
-              console.log(
-                " QR CODE TERSEDIA"
-              );
-              console.log(
-                " Buka: http://localhost:" +
-                PORT +
-                "/qr"
-              );
-              console.log(
-                "========================================"
-              );
-              console.log("");
-            } catch (error) {
-              console.log(
-                "QR generate error:",
-                error?.message || error
-              );
-            }
+            console.log(
+              "QR CODE TERSEDIA."
+            );
+
+            console.log(
+              "Buka endpoint /qr untuk melihat QR."
+            );
           }
 
-          // --------------------------------------------------
-          // CONNECTED
-          // --------------------------------------------------
+          // ---------------------------------------------
+          // OPEN
+          // ---------------------------------------------
 
-          if (connection === "open") {
-            connectionStatus = "connected";
-            qrImage = null;
+          if (
+            connection === "open"
+          ) {
+            connectionStatus =
+              "open";
 
-            console.log("");
+            qrCode = null;
+
+            startedAt =
+              Date.now();
+
             console.log(
-              "========================================"
+              "================================"
             );
+
             console.log(
-              "       ZAZABOT BERHASIL ONLINE"
+              `${BOT_NAME} BERHASIL ONLINE`
             );
+
             console.log(
-              "========================================"
+              "================================"
             );
-            console.log(
-              "Nama Bot :",
-              BOT_NAME
-            );
-            console.log(
-              "Owner    :",
-              OWNER_NUMBER
-            );
-            console.log(
-              "Prefix   :",
-              PREFIX
-            );
-            console.log(
-              "Status   : ONLINE"
-            );
-            console.log(
-              "========================================"
-            );
-            console.log("");
           }
 
-          // --------------------------------------------------
-          // DISCONNECTED
-          // --------------------------------------------------
+          // ---------------------------------------------
+          // CLOSE
+          // ---------------------------------------------
 
-          if (connection === "close") {
-            connectionStatus = "disconnected";
+          if (
+            connection === "close"
+          ) {
+            connectionStatus =
+              "closed";
 
             const statusCode =
               lastDisconnect
@@ -5000,111 +5433,82 @@ async function startBot() {
                 ?.statusCode;
 
             console.log(
-              "Koneksi WhatsApp terputus."
+              "Koneksi WhatsApp terputus.",
+              statusCode || ""
             );
-
-            console.log(
-              "Status code:",
-              statusCode || "unknown"
-            );
-
-            // Hindari reconnect berkali-kali
-            if (reconnectTimer) {
-              clearTimeout(
-                reconnectTimer
-              );
-            }
-
-            // ------------------------------------------------
-            // JIKA SESSION LOGOUT
-            // ------------------------------------------------
 
             if (
               statusCode ===
               DisconnectReason.loggedOut
             ) {
               console.log(
-                "Session logout."
-              );
-
-              console.log(
-                "Hapus folder session lalu scan QR kembali."
+                "Session logout. Hapus folder session lalu scan ulang."
               );
 
               return;
             }
 
-            // ------------------------------------------------
-            // RECONNECT OTOMATIS
-            // ------------------------------------------------
+            if (
+              reconnectTimer
+            ) {
+              return;
+            }
 
             reconnectTimer =
               setTimeout(
                 async () => {
+                  reconnectTimer =
+                    null;
+
                   console.log(
                     "Mencoba reconnect..."
                   );
 
-                  try {
-                    await startBot();
-                  } catch (error) {
-                    console.log(
-                      "Reconnect error:",
-                      error?.message || error
-                    );
-                  }
+                  await startBot();
                 },
                 5000
               );
           }
+
         } catch (error) {
-          console.log(
-            "connection.update error:",
-            error?.message || error
+          console.error(
+            "CONNECTION UPDATE ERROR:",
+            error
           );
         }
       }
     );
 
-    // --------------------------------------------------------
-    // PESAN MASUK
-    // --------------------------------------------------------
+    // =================================================
+    // INCOMING MESSAGE
+    // =================================================
 
     sock.ev.on(
       "messages.upsert",
-      async ({ messages }) => {
-        try {
-          if (
-            !Array.isArray(messages) ||
-            messages.length === 0
-          ) {
-            return;
-          }
+      async ({
+        messages,
+        type
+      }) => {
+        if (
+          type !== "notify"
+        ) {
+          return;
+        }
 
-          for (const message of messages) {
-            try {
-              await handleMessage(
-                message
-              );
-            } catch (error) {
-              console.log(
-                "Message processing error:",
-                error?.message || error
-              );
-            }
-          }
-        } catch (error) {
-          console.log(
-            "messages.upsert error:",
-            error?.message || error
+        for (
+          const message
+          of messages
+        ) {
+          await handleMessage(
+            message
           );
         }
       }
     );
 
-    // --------------------------------------------------------
+    // =================================================
     // GROUP PARTICIPANTS
-    // --------------------------------------------------------
+    // =================================================
 
     sock.ev.on(
       "group-participants.update",
@@ -5114,124 +5518,171 @@ async function startBot() {
             update
           );
         } catch (error) {
-          console.log(
-            "group-participants.update error:",
-            error?.message || error
+          console.error(
+            "PARTICIPANT ERROR:",
+            error
           );
         }
       }
     );
 
   } catch (error) {
-    connectionStatus = "error";
+    connectionStatus =
+      "error";
 
-    console.log("");
-    console.log(
-      "========================================"
+    console.error(
+      "START BOT ERROR:",
+      error
     );
-    console.log(
-      "       GAGAL MENJALANKAN ZAZABOT"
-    );
-    console.log(
-      "========================================"
-    );
-    console.log(
-      error?.stack || error
-    );
-    console.log(
-      "========================================"
-    );
-    console.log("");
 
-    // Coba start ulang
-    if (reconnectTimer) {
-      clearTimeout(
-        reconnectTimer
-      );
+    if (!reconnectTimer) {
+      reconnectTimer =
+        setTimeout(
+          async () => {
+            reconnectTimer =
+              null;
+
+            await startBot();
+          },
+          10000
+        );
     }
-
-    reconnectTimer =
-      setTimeout(
-        () => {
-          startBot().catch(
-            err => {
-              console.log(
-                "Start ulang gagal:",
-                err?.message || err
-              );
-            }
-          );
-        },
-        5000
-      );
   }
-    }
-// ============================================================
-// PART 9/10 — WEB SERVER + STATUS + QR
-// ============================================================
+}
+
+// =====================================================
+// START ZAZABOT
+// =====================================================
+
+startBot();
+
+console.log(
+  `${BOT_NAME} sedang dijalankan...`
+);
+// =====================================================
+// ZAZABOT - PART 9
+// WEB SERVER / STATUS / QR
+// =====================================================
 
 const server = http.createServer(
   async (req, res) => {
     try {
-      const url = new URL(
-        req.url,
-        `http://localhost:${PORT}`
-      );
+      const url =
+        req.url || "/";
 
-      // ------------------------------------------------------
-      // HEADERS
-      // ------------------------------------------------------
+      // =================================================
+      // HOME
+      // =================================================
 
-      res.setHeader(
-        "Access-Control-Allow-Origin",
-        "*"
-      );
+      if (
+        url === "/" ||
+        url === "/index.html"
+      ) {
+        res.writeHead(
+          200,
+          {
+            "Content-Type":
+              "text/html; charset=utf-8"
+          }
+        );
 
-      res.setHeader(
-        "Access-Control-Allow-Methods",
-        "GET, POST, OPTIONS"
-      );
+        res.end(`
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport"
+content="width=device-width,initial-scale=1.0">
+<title>${BOT_NAME}</title>
 
-      res.setHeader(
-        "Content-Type",
-        "text/html; charset=utf-8"
-      );
+<style>
+body {
+  margin: 0;
+  font-family: Arial, sans-serif;
+  background: #0b1220;
+  color: white;
+  text-align: center;
+}
 
-      // ------------------------------------------------------
-      // OPTIONS
-      // ------------------------------------------------------
+.container {
+  max-width: 500px;
+  margin: 80px auto;
+  padding: 30px;
+}
 
-      if (req.method === "OPTIONS") {
-        res.writeHead(204);
-        res.end();
+.card {
+  background: #111827;
+  border-radius: 20px;
+  padding: 30px;
+  box-shadow: 0 10px 30px rgba(0,0,0,.3);
+}
+
+h1 {
+  margin-bottom: 10px;
+}
+
+.status {
+  font-size: 20px;
+  margin: 20px 0;
+}
+
+a {
+  display: block;
+  margin: 12px;
+  padding: 14px;
+  border-radius: 12px;
+  background: #2563eb;
+  color: white;
+  text-decoration: none;
+}
+
+a:hover {
+  background: #1d4ed8;
+}
+</style>
+</head>
+
+<body>
+
+<div class="container">
+
+<div class="card">
+
+<h1>🤖 ${BOT_NAME}</h1>
+
+<p>WhatsApp Bot</p>
+
+<div class="status">
+Status:
+<b>${connectionStatus}</b>
+</div>
+
+<a href="/status">
+📊 Status Bot
+</a>
+
+<a href="/qr">
+📱 QR Code
+</a>
+
+</div>
+
+</div>
+
+</body>
+</html>
+        `);
+
         return;
       }
 
-      // ------------------------------------------------------
-      // HOME
-      // ------------------------------------------------------
+      // =================================================
+      // STATUS
+      // =================================================
 
       if (
-        url.pathname === "/" ||
-        url.pathname === "/status"
+        url === "/status"
       ) {
-        const uptime =
-          Date.now() - startedAt;
-
-        const statusData = {
-          bot: BOT_NAME,
-          status: connectionStatus,
-          owner: OWNER_NUMBER,
-          prefix: PREFIX,
-          uptime: formatRuntime(uptime),
-          messages: db.stats.messages,
-          commands: db.stats.commands,
-          users: Object.keys(db.users).length,
-          groups: Object.keys(db.groups).length,
-          premium: Object.keys(db.premium).length,
-          time: new Date().toISOString()
-        };
-
         res.writeHead(
           200,
           {
@@ -5242,7 +5693,42 @@ const server = http.createServer(
 
         res.end(
           JSON.stringify(
-            statusData,
+            {
+              bot: BOT_NAME,
+
+              status:
+                connectionStatus,
+
+              public:
+                publicMode,
+
+              uptime:
+                formatRuntime(
+                  Date.now() -
+                  startedAt
+                ),
+
+              messages:
+                db.stats?.messages ||
+                0,
+
+              commands:
+                db.stats?.commands ||
+                0,
+
+              users:
+                Object.keys(
+                  db.users || {}
+                ).length,
+
+              groups:
+                Object.keys(
+                  db.groups || {}
+                ).length,
+
+              time:
+                new Date().toISOString()
+            },
             null,
             2
           )
@@ -5251,11 +5737,13 @@ const server = http.createServer(
         return;
       }
 
-      // ------------------------------------------------------
-      // QR PAGE
-      // ------------------------------------------------------
+      // =================================================
+      // QR CODE
+      // =================================================
 
-      if (url.pathname === "/qr") {
+      if (
+        url === "/qr"
+      ) {
         res.writeHead(
           200,
           {
@@ -5264,56 +5752,31 @@ const server = http.createServer(
           }
         );
 
-        if (!qrImage) {
+        if (!qrCode) {
           res.end(`
 <!DOCTYPE html>
-<html lang="id">
+<html>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport"
-      content="width=device-width,
-               initial-scale=1.0">
-<title>ZazaBot QR</title>
+content="width=device-width,initial-scale=1">
+<title>QR ${BOT_NAME}</title>
 
 <style>
 body {
-  margin: 0;
-  min-height: 100vh;
-  display: flex;
-  align-items: center;
-  justify-content: center;
   background: #0b1220;
   color: white;
-  font-family: Arial, sans-serif;
+  font-family: Arial;
+  text-align: center;
+  padding-top: 60px;
 }
 
 .card {
-  width: 90%;
-  max-width: 420px;
+  max-width: 400px;
+  margin: auto;
   padding: 30px;
-  text-align: center;
-  border-radius: 20px;
   background: #111827;
-  box-shadow: 0 10px 40px rgba(0,0,0,.4);
-}
-
-h1 {
-  margin-bottom: 10px;
-}
-
-.status {
-  margin: 20px 0;
-  padding: 15px;
-  border-radius: 12px;
-  background: #1f2937;
-}
-
-button {
-  border: 0;
-  padding: 12px 20px;
-  border-radius: 10px;
-  cursor: pointer;
-  font-weight: bold;
+  border-radius: 20px;
 }
 </style>
 </head>
@@ -5322,26 +5785,22 @@ button {
 
 <div class="card">
 
-  <h1>🤖 ZazaBot</h1>
+<h2>📱 QR ${BOT_NAME}</h2>
 
-  <div class="status">
-    📡 Status:
-    <b>${connectionStatus}</b>
-  </div>
+<p>QR belum tersedia.</p>
 
-  <p>
-    QR Code belum tersedia.
-  </p>
+<p>
+Status:
+<b>${connectionStatus}</b>
+</p>
 
-  <p>
-    Jika bot sedang menghubungkan WhatsApp,
-    refresh halaman ini.
-  </p>
+<p>
+Tunggu beberapa detik lalu refresh.
+</p>
 
-  <button
-    onclick="location.reload()">
-    🔄 Refresh
-  </button>
+<a href="/qr">
+🔄 Refresh
+</a>
 
 </div>
 
@@ -5352,498 +5811,268 @@ button {
           return;
         }
 
-        res.end(`
+        try {
+          const qrImage =
+            await QRCode.toDataURL(
+              qrCode,
+              {
+                width: 350,
+                margin: 2
+              }
+            );
+
+          res.end(`
 <!DOCTYPE html>
-<html lang="id">
-
+<html>
 <head>
-
 <meta charset="UTF-8">
-
 <meta name="viewport"
-      content="width=device-width,
-               initial-scale=1.0">
-
-<meta
-  http-equiv="refresh"
-  content="20"
->
-
-<title>ZazaBot - QR Login</title>
+content="width=device-width,initial-scale=1">
+<title>QR ${BOT_NAME}</title>
 
 <style>
-
-* {
-  box-sizing: border-box;
-}
-
 body {
-  margin: 0;
-  min-height: 100vh;
-
-  display: flex;
-  align-items: center;
-  justify-content: center;
-
-  font-family: Arial, sans-serif;
-
-  background:
-    linear-gradient(
-      135deg,
-      #020617,
-      #0f172a,
-      #172554
-    );
-
+  background: #0b1220;
   color: white;
+  font-family: Arial;
+  text-align: center;
+  padding: 30px;
 }
 
 .card {
-  width: 92%;
-  max-width: 450px;
-
-  padding: 30px;
-
-  text-align: center;
-
-  border-radius: 24px;
-
-  background:
-    rgba(15, 23, 42, .95);
-
-  box-shadow:
-    0 20px 60px
-    rgba(0, 0, 0, .5);
-}
-
-.logo {
-  font-size: 55px;
-  margin-bottom: 10px;
-}
-
-h1 {
-  margin: 0;
-  font-size: 28px;
-}
-
-p {
-  color: #cbd5e1;
-}
-
-.qr {
-  margin: 25px auto;
-
-  padding: 15px;
-
-  width: fit-content;
-
+  max-width: 420px;
+  margin: auto;
   background: white;
-
-  border-radius: 18px;
+  color: black;
+  padding: 25px;
+  border-radius: 20px;
 }
 
-.qr img {
-  display: block;
-
-  width: 280px;
-  max-width: 70vw;
-  height: auto;
+img {
+  width: 100%;
+  max-width: 350px;
 }
 
-.info {
-  padding: 15px;
-
-  border-radius: 14px;
-
-  background:
-    rgba(30, 41, 59, .8);
-
-  margin-top: 15px;
-}
-
-.refresh {
-  margin-top: 20px;
-
+button {
   padding: 12px 20px;
-
-  border: none;
-
+  border: 0;
   border-radius: 10px;
-
-  font-size: 15px;
-
-  font-weight: bold;
-
-  cursor: pointer;
+  background: #2563eb;
+  color: white;
 }
-
-.small {
-  font-size: 13px;
-  color: #94a3b8;
-}
-
 </style>
-
 </head>
 
 <body>
 
 <div class="card">
 
-  <div class="logo">
-    🤖
-  </div>
+<h2>📱 Scan QR ${BOT_NAME}</h2>
 
-  <h1>
-    ZazaBot
-  </h1>
+<img src="${qrImage}" />
 
-  <p>
-    Scan QR Code menggunakan WhatsApp
-  </p>
+<p>
+Buka WhatsApp → Perangkat tertaut
+→ Tautkan perangkat
+</p>
 
-  <div class="qr">
-    <img
-      src="${qrImage}"
-      alt="WhatsApp QR Code"
-    >
-  </div>
-
-  <div class="info">
-
-    <b>📱 Cara Login</b>
-
-    <p>
-      WhatsApp →
-      Perangkat tertaut →
-      Tautkan perangkat
-    </p>
-
-  </div>
-
-  <button
-    class="refresh"
-    onclick="location.reload()"
-  >
-    🔄 Refresh QR
-  </button>
-
-  <p class="small">
-    Halaman akan refresh otomatis.
-  </p>
+<button onclick="location.reload()">
+🔄 Refresh QR
+</button>
 
 </div>
 
 </body>
-
 </html>
-        `);
+          `);
+
+        } catch (error) {
+          res.end(`
+QR gagal dibuat.
+
+Error:
+${String(error)}
+          `);
+        }
 
         return;
       }
 
-      // ------------------------------------------------------
-      // API STATUS
-      // ------------------------------------------------------
-
-      if (
-        url.pathname === "/api/status"
-      ) {
-        const data = {
-          success: true,
-          bot: BOT_NAME,
-          status: connectionStatus,
-          uptime: formatRuntime(
-            Date.now() - startedAt
-          ),
-          stats: db.stats
-        };
-
-        res.writeHead(
-          200,
-          {
-            "Content-Type":
-              "application/json; charset=utf-8"
-          }
-        );
-
-        res.end(
-          JSON.stringify(
-            data,
-            null,
-            2
-          )
-        );
-
-        return;
-      }
-
-      // ------------------------------------------------------
+      // =================================================
       // 404
-      // ------------------------------------------------------
+      // =================================================
 
       res.writeHead(
         404,
         {
           "Content-Type":
-            "application/json; charset=utf-8"
+            "text/plain; charset=utf-8"
         }
       );
 
       res.end(
-        JSON.stringify({
-          success: false,
-          error: "Endpoint tidak ditemukan",
-          path: url.pathname
-        })
+        "404 - Halaman tidak ditemukan"
       );
 
     } catch (error) {
-
-      console.log(
-        "HTTP server error:",
-        error?.message || error
+      console.error(
+        "HTTP ERROR:",
+        error
       );
 
       res.writeHead(
         500,
         {
           "Content-Type":
-            "application/json; charset=utf-8"
+            "text/plain; charset=utf-8"
         }
       );
 
       res.end(
-        JSON.stringify({
-          success: false,
-          error: "Internal server error"
-        })
+        "Internal Server Error"
       );
     }
   }
 );
 
-
-// ============================================================
-// SERVER LISTEN
-// ============================================================
+// =====================================================
+// LISTEN SERVER
+// =====================================================
 
 server.listen(
   PORT,
   "0.0.0.0",
   () => {
-
-    console.log("");
     console.log(
-      "========================================"
+      "================================"
     );
 
     console.log(
-      "       ZAZABOT WEB SERVER"
+      `WEB SERVER AKTIF DI PORT ${PORT}`
     );
 
     console.log(
-      "========================================"
+      `http://0.0.0.0:${PORT}`
     );
 
     console.log(
-      `Port   : ${PORT}`
+      "================================"
     );
-
-    console.log(
-      `Status : http://localhost:${PORT}/status`
-    );
-
-    console.log(
-      `QR     : http://localhost:${PORT}/qr`
-    );
-
-    console.log(
-      "========================================"
-    );
-
-    console.log("");
-
   }
 );
 
+// =====================================================
+// AUTO SAVE DATABASE
+// =====================================================
 
-// ============================================================
-// MULAI ZAZABOT
-// ============================================================
+setInterval(
+  () => {
+    try {
+      saveDB();
 
-startBot().catch(
-  error => {
-
-    console.log(
-      "startBot fatal error:",
-      error?.stack || error
-    );
-
-  }
-);
-// ============================================================
-// PART 10/10 — AUTOSAVE + SHUTDOWN
-// ============================================================
-
-// ------------------------------------------------------------
-// SIMPAN DATABASE OTOMATIS SETIAP 30 DETIK
-// ------------------------------------------------------------
-
-setInterval(() => {
-  try {
-    saveDB();
-
-    console.log(
-      `[DB] Database tersimpan ${new Date().toLocaleTimeString()}`
-    );
-  } catch (error) {
-    console.log(
-      "[DB] Gagal menyimpan database:",
-      error?.message || error
-    );
-  }
-}, 30000);
-
-
-// ------------------------------------------------------------
-// SHUTDOWN DENGAN AMAN
-// ------------------------------------------------------------
-
-async function shutdown(signal) {
-  console.log("");
-  console.log(
-    "========================================"
-  );
-  console.log(
-    `Menerima signal: ${signal}`
-  );
-  console.log(
-    "Mematikan ZazaBot..."
-  );
-  console.log(
-    "========================================"
-  );
-
-  try {
-    // Simpan database terlebih dahulu
-    saveDB();
-
-    console.log(
-      "✅ Database berhasil disimpan."
-    );
-  } catch (error) {
-    console.log(
-      "❌ Gagal menyimpan database:",
-      error?.message || error
-    );
-  }
-
-  try {
-    // Tutup web server
-    server.close(() => {
       console.log(
-        "✅ Web server ditutup."
+        "Database tersimpan."
       );
-    });
-  } catch {}
+    } catch (error) {
+      console.error(
+        "AUTO SAVE ERROR:",
+        error
+      );
+    }
+  },
+  60 * 1000
+);
+
+// =====================================================
+// GRACEFUL SHUTDOWN
+// =====================================================
+
+async function shutdown(
+  signal
+) {
+  console.log(
+    `${signal} diterima.`
+  );
 
   try {
-    // Tutup koneksi WhatsApp
-    if (sock) {
-      sock.ws?.close();
+    saveDB();
+
+    if (server) {
+      server.close();
     }
 
-    console.log(
-      "✅ Koneksi WhatsApp ditutup."
-    );
-  } catch {}
+    if (sock) {
+      try {
+        sock.end(
+          undefined
+        );
+      } catch {
+        // abaikan
+      }
+    }
 
-  console.log(
-    "ZazaBot berhenti."
-  );
+  } catch (error) {
+    console.error(
+      "SHUTDOWN ERROR:",
+      error
+    );
+  }
 
   process.exit(0);
 }
 
-
-// ------------------------------------------------------------
-// HANDLE CTRL + C
-// ------------------------------------------------------------
-
 process.on(
   "SIGINT",
-  () => {
-    shutdown("SIGINT");
-  }
+  () => shutdown("SIGINT")
 );
-
-
-// ------------------------------------------------------------
-// HANDLE TERMINATE
-// ------------------------------------------------------------
 
 process.on(
   "SIGTERM",
-  () => {
-    shutdown("SIGTERM");
-  }
+  () => shutdown("SIGTERM")
 );
 
-
-// ------------------------------------------------------------
-// HANDLE ERROR YANG TIDAK TERTANGANI
-// ------------------------------------------------------------
+// =====================================================
+// ERROR HANDLER
+// =====================================================
 
 process.on(
-  "unhandledRejection",
-  error => {
-    console.log(
-      "Unhandled Promise Rejection:",
+  "uncaughtException",
+  (error) => {
+    console.error(
+      "UNCAUGHT EXCEPTION:",
       error
     );
   }
 );
 
-
 process.on(
-  "uncaughtException",
-  error => {
-    console.log(
-      "Uncaught Exception:",
-      error?.stack || error
+  "unhandledRejection",
+  (error) => {
+    console.error(
+      "UNHANDLED REJECTION:",
+      error
     );
   }
 );
 
-
-// ============================================================
-// ZAZABOT SELESAI
-// ============================================================
+console.log(
+  `${BOT_NAME} PART 9 loaded successfully.`
+);
+// =====================================================
+// ZAZABOT - PART 10
+// FINAL CHECK
+// =====================================================
 
 console.log("");
-console.log(
-  "========================================"
-);
-console.log(
-  "          ZAZABOT READY"
-);
-console.log(
-  "========================================"
-);
-console.log(
-  `Bot Name : ${BOT_NAME}`
-);
-console.log(
-  `Prefix   : ${PREFIX}`
-);
-console.log(
-  `Owner    : ${OWNER_NUMBER}`
-);
-console.log(
-  `Port     : ${PORT}`
-);
-console.log(
-  "========================================"
-);
-console.log("");
+console.log("========================================");
+console.log(`🤖 ${BOT_NAME} INITIALIZATION COMPLETE`);
+console.log("========================================");
+console.log(`📌 Prefix       : ${PREFIX}`);
+console.log(`👑 Owner        : ${OWNER_NUMBER}`);
+console.log(`🌐 Port         : ${PORT}`);
+console.log(`📁 Session      : ${SESSION_DIR}`);
+console.log(`💾 Database     : ${DATABASE_FILE}`);
+console.log(`📡 Connection   : ${connectionStatus}`);
+console.log("========================================");
+console.log("✅ Semua PART index.js telah dimuat.");
+console.log("========================================");
