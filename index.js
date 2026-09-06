@@ -1975,55 +1975,130 @@ async function handleCommand(
 // =====================================================
 
 // =====================================================
-// SEARCH PLACEHOLDER
+// SEARCH
 // =====================================================
 
 async function googleSearch(query) {
-  return `🔎 Hasil Google untuk: ${query}\n\n⚠️ Google Search API belum dikonfigurasi.`;
-}
+  try {
+    const url =
+      "https://www.google.com/search?q=" +
+      encodeURIComponent(query);
 
-// =====================================================
+    return (
+      `🔎 *GOOGLE SEARCH*\n\n` +
+      `Query: ${query}\n\n` +
+      `🌐 ${url}`
+    );
+
+  } catch (error) {
+    return `❌ Google error: ${error.message}`;
+  }
+}
 
 async function googleImageSearch(query) {
-  return `🖼️ Pencarian gambar: ${query}\n\n⚠️ Google Image API belum dikonfigurasi.`;
-}
+  try {
+    const url =
+      "https://www.google.com/search?tbm=isch&q=" +
+      encodeURIComponent(query);
 
-// =====================================================
+    return (
+      `🖼️ *GOOGLE IMAGE*\n\n` +
+      `Query: ${query}\n\n` +
+      `🌐 ${url}`
+    );
+
+  } catch (error) {
+    return `❌ Google Image error: ${error.message}`;
+  }
+}
 
 async function wikipediaSearch(query) {
-  return `📚 Wikipedia: ${query}\n\n⚠️ Wikipedia API belum dikonfigurasi.`;
-}
+  try {
+    const api =
+      "https://id.wikipedia.org/api/rest_v1/page/summary/" +
+      encodeURIComponent(query);
 
-// =====================================================
+    const response =
+      await fetch(api);
+
+    if (!response.ok) {
+      return (
+        `❌ Artikel Wikipedia tidak ditemukan.\n\n` +
+        `🔎 ${query}`
+      );
+    }
+
+    const data =
+      await response.json();
+
+    return (
+      `📚 *WIKIPEDIA*\n\n` +
+      `📌 ${data.title || query}\n\n` +
+      `${data.extract || "Tidak ada ringkasan."}\n\n` +
+      `🔗 ${data.content_urls?.desktop?.page || ""}`
+    );
+
+  } catch (error) {
+    return `❌ Wikipedia error: ${error.message}`;
+  }
+}
 
 async function youtubeSearch(query) {
-  return `▶️ YouTube Search: ${query}\n\n⚠️ YouTube Search API belum dikonfigurasi.`;
-}
+  try {
+    const url =
+      "https://www.youtube.com/results?search_query=" +
+      encodeURIComponent(query);
 
-// =====================================================
+    return (
+      `▶️ *YOUTUBE SEARCH*\n\n` +
+      `Query: ${query}\n\n` +
+      `🔗 ${url}`
+    );
+
+  } catch (error) {
+    return `❌ YouTube error: ${error.message}`;
+  }
+}
 
 async function lyricSearch(query) {
-  return `🎵 Lirik: ${query}\n\n⚠️ Lirik API belum dikonfigurasi.`;
+  try {
+    const url =
+      "https://www.google.com/search?q=" +
+      encodeURIComponent(
+        query + " lyrics"
+      );
+
+    return (
+      `🎵 *LIRIK*\n\n` +
+      `Judul: ${query}\n\n` +
+      `🔎 Cari lirik:\n${url}`
+    );
+
+  } catch (error) {
+    return `❌ Lirik error: ${error.message}`;
+  }
 }
 
 // =====================================================
-// MEDIA HELPERS
+// DOWNLOAD MEDIA DARI PESAN
 // =====================================================
 
 async function downloadMedia(
   messageContent,
-  type = "image"
+  type
 ) {
-  if (!sock || !messageContent) {
-    return null;
-  }
-
   try {
     const {
       downloadContentFromMessage
     } = await import(
       "@whiskeysockets/baileys"
     );
+
+    if (!messageContent) {
+      throw new Error(
+        "Media tidak ditemukan."
+      );
+    }
 
     const stream =
       await downloadContentFromMessage(
@@ -2033,7 +2108,9 @@ async function downloadMedia(
 
     const chunks = [];
 
-    for await (const chunk of stream) {
+    for await (
+      const chunk of stream
+    ) {
       chunks.push(chunk);
     }
 
@@ -2042,27 +2119,53 @@ async function downloadMedia(
   } catch (error) {
     console.error(
       "DOWNLOAD MEDIA ERROR:",
-      error.message
+      error
     );
 
-    return null;
+    throw new Error(
+      "Gagal mengambil media."
+    );
   }
 }
 
 // =====================================================
-// STATIC STICKER
+// STICKER
 // =====================================================
 
 async function makeStaticSticker(
   buffer
 ) {
-  if (!buffer) {
-    return null;
-  }
+  try {
+    const {
+      Sticker,
+      StickerTypes
+    } = await import(
+      "wa-sticker-formatter"
+    );
 
-  // Untuk sementara mengirim media asli
-  // agar bot tetap stabil tanpa ffmpeg/sharp.
-  return buffer;
+    const sticker =
+      new Sticker(
+        buffer,
+        {
+          pack: "ZazaBot",
+          author: "Zaza Store",
+          type: StickerTypes.FULL,
+          quality: 80
+        }
+      );
+
+    return await sticker.toBuffer();
+
+  } catch (error) {
+    console.error(
+      "STICKER ERROR:",
+      error
+    );
+
+    throw new Error(
+      "Gagal membuat sticker. Pastikan wa-sticker-formatter sudah terinstall."
+    );
+  }
 }
 
 // =====================================================
@@ -2072,36 +2175,96 @@ async function makeStaticSticker(
 async function textSticker(
   text
 ) {
-  return Buffer.from(
-    String(text || "ZazaBot")
-  );
+  try {
+    const sharp =
+      (await import("sharp"))
+        .default;
+
+    const width = 512;
+    const height = 512;
+
+    const safeText =
+      String(text || "")
+        .replace(
+          /&/g,
+          "&amp;"
+        )
+        .replace(
+          /</g,
+          "&lt;"
+        )
+        .replace(
+          />/g,
+          "&gt;"
+        );
+
+    const svg = `
+<svg
+  width="${width}"
+  height="${height}"
+  xmlns="http://www.w3.org/2000/svg"
+>
+  <rect
+    width="100%"
+    height="100%"
+    rx="60"
+    fill="white"
+  />
+
+  <text
+    x="256"
+    y="256"
+    text-anchor="middle"
+    dominant-baseline="middle"
+    font-family="Arial"
+    font-size="42"
+    font-weight="bold"
+    fill="black"
+  >
+    ${safeText.slice(0, 30)}
+  </text>
+</svg>
+`;
+
+    const png =
+      await sharp(
+        Buffer.from(svg)
+      )
+      .png()
+      .toBuffer();
+
+    return await makeStaticSticker(
+      png
+    );
+
+  } catch (error) {
+    console.error(
+      "TEXT STICKER ERROR:",
+      error
+    );
+
+    throw new Error(
+      "Gagal membuat text sticker."
+    );
+  }
 }
 
 // =====================================================
-// SEND QR
+// QR CODE
 // =====================================================
 
 async function sendQR(
   chat,
   data
 ) {
-  if (!data) {
-    await sendText(
-      chat,
-      "❌ QR tidak tersedia."
-    );
-
-    return;
-  }
-
   try {
     const buffer =
       await QRCode.toBuffer(
-        data,
+        String(data),
         {
-          type: "png",
-          width: 600,
-          margin: 2
+          width: 700,
+          margin: 3,
+          errorCorrectionLevel: "H"
         }
       );
 
@@ -2110,33 +2273,162 @@ async function sendQR(
       {
         image: buffer,
         caption:
-          "📱 Silakan scan QR di atas."
+          `📱 *QR CODE*\n\n` +
+          `Data:\n${data}`
       }
     );
 
   } catch (error) {
     console.error(
-      "SEND QR ERROR:",
-      error.message
+      "QR ERROR:",
+      error
     );
 
     await sendText(
       chat,
-      "❌ Gagal membuat QR."
+      `❌ Gagal membuat QR Code.\n\n${error.message}`
     );
   }
 }
 
 // =====================================================
-// TINY URL PLACEHOLDER
+// SHORTLINK
 // =====================================================
 
-async function tinyUrl(url) {
-  return url;
+async function tinyUrl(
+  url
+) {
+  try {
+    const api =
+      "https://tinyurl.com/api-create.php?url=" +
+      encodeURIComponent(url);
+
+    const response =
+      await fetch(api);
+
+    if (!response.ok) {
+      return url;
+    }
+
+    const result =
+      await response.text();
+
+    return (
+      result.trim() || url
+    );
+
+  } catch {
+    return url;
+  }
 }
 
 // =====================================================
-// COMMAND HANDLER PART 4
+// BRAT
+// =====================================================
+
+async function createBrat(
+  text
+) {
+  try {
+    const api =
+      "https://rayhanzuck.vercel.app/api/tools/brat?text=" +
+      encodeURIComponent(text);
+
+    const response =
+      await fetch(api);
+
+    if (!response.ok) {
+      throw new Error(
+        "Server Brat tidak merespons."
+      );
+    }
+
+    const arrayBuffer =
+      await response.arrayBuffer();
+
+    const buffer =
+      Buffer.from(arrayBuffer);
+
+    if (!buffer.length) {
+      throw new Error(
+        "Gambar Brat kosong."
+      );
+    }
+
+    return buffer;
+
+  } catch (error) {
+    console.error(
+      "BRAT ERROR:",
+      error
+    );
+
+    throw new Error(
+      "Gagal mengambil gambar Brat."
+    );
+  }
+}
+
+// =====================================================
+// TIKTOK
+// =====================================================
+
+async function downloadTikTok(
+  url
+) {
+  try {
+    const api =
+      "https://tdownv4.sl-bjs.workers.dev/?down=" +
+      encodeURIComponent(url);
+
+    const response =
+      await fetch(api);
+
+    if (!response.ok) {
+      throw new Error(
+        "Downloader TikTok tidak merespons."
+      );
+    }
+
+    const data =
+      await response.json();
+
+    const video =
+      data.download_url ||
+      data.no_watermark ||
+      data.video ||
+      data.url;
+
+    const audio =
+      data.audio_url ||
+      data.audio;
+
+    if (!video) {
+      throw new Error(
+        "Link video tidak ditemukan."
+      );
+    }
+
+    return {
+      video,
+      audio,
+      data
+    };
+
+  } catch (error) {
+    console.error(
+      "TIKTOK ERROR:",
+      error
+    );
+
+    throw new Error(
+      "Gagal mendownload TikTok."
+    );
+  }
+}
+
+// =====================================================
+// COMMAND PART 4
 // =====================================================
 
 async function handleCommandPart4(
@@ -2145,432 +2437,739 @@ async function handleCommandPart4(
   args,
   text
 ) {
-  const chat = getChat(message);
+  const chat =
+    getChat(message);
 
-  // ===================================================
-  // SEARCH
-  // ===================================================
+  try {
 
-  if (command === "google") {
-    if (!text) {
-      await sendText(
-        chat,
-        `Contoh:\n${PREFIX}google Zaza Store`
-      );
-      return true;
-    }
-
-    const result =
-      await googleSearch(text);
-
-    await sendText(
-      chat,
-      result
-    );
-
-    return true;
-  }
-
-  if (command === "googleimage") {
-    if (!text) {
-      await sendText(
-        chat,
-        `Contoh:\n${PREFIX}googleimage kucing`
-      );
-      return true;
-    }
-
-    const result =
-      await googleImageSearch(text);
-
-    await sendText(
-      chat,
-      result
-    );
-
-    return true;
-  }
-
-  if (command === "wikipedia") {
-    if (!text) {
-      await sendText(
-        chat,
-        `Contoh:\n${PREFIX}wikipedia Indonesia`
-      );
-      return true;
-    }
-
-    const result =
-      await wikipediaSearch(text);
-
-    await sendText(
-      chat,
-      result
-    );
-
-    return true;
-  }
-
-  if (command === "ytsearch") {
-    if (!text) {
-      await sendText(
-        chat,
-        `Contoh:\n${PREFIX}ytsearch lagu Indonesia`
-      );
-      return true;
-    }
-
-    const result =
-      await youtubeSearch(text);
-
-    await sendText(
-      chat,
-      result
-    );
-
-    return true;
-  }
-
-  if (command === "lirik") {
-    if (!text) {
-      await sendText(
-        chat,
-        `Contoh:\n${PREFIX}lirik judul lagu`
-      );
-      return true;
-    }
-
-    const result =
-      await lyricSearch(text);
-
-    await sendText(
-      chat,
-      result
-    );
-
-    return true;
-  }
-
-  // ===================================================
-  // DOWNLOAD
-  // ===================================================
-
-  const downloadCommands = [
-    "tiktok",
-    "tiktoknowm",
-    "tiktokwm",
-    "igdl",
-    "igreel",
-    "instagram",
-    "facebook",
-    "ytmp3",
-    "ytmp4"
-  ];
-
-  if (
-    downloadCommands.includes(command)
-  ) {
-    const url =
-      extractUrl(text);
-
-    if (!url) {
-      await sendText(
-        chat,
-        `❌ Masukkan URL.\n\nContoh:\n${PREFIX}${command} https://contoh.com/video`
-      );
-
-      return true;
-    }
-
-    await sendText(
-      chat,
-      `⏳ URL diterima:\n${url}\n\n⚠️ Downloader ${command} belum dikonfigurasi dengan API downloader.`
-    );
-
-    return true;
-  }
-
-  // ===================================================
-  // STICKER
-  // ===================================================
-
-  if (
-    command === "sticker" ||
-    command === "s"
-  ) {
-    const msg =
-      message?.message;
-
-    const imageMessage =
-      msg?.imageMessage;
-
-    const quoted =
-      msg?.extendedTextMessage
-        ?.contextInfo
-        ?.quotedMessage;
-
-    let media = null;
-
-    if (imageMessage) {
-      media =
-        await downloadMedia(
-          imageMessage,
-          "image"
-        );
-    }
+    // =================================================
+    // GOOGLE
+    // =================================================
 
     if (
-      !media &&
-      quoted?.imageMessage
+      command === "google"
     ) {
-      media =
-        await downloadMedia(
-          quoted.imageMessage,
-          "image"
+      if (!text) {
+        await sendText(
+          chat,
+          `Contoh:\n${PREFIX}google Zaza Store`
         );
-    }
 
-    if (!media) {
+        return true;
+      }
+
       await sendText(
         chat,
-        "❌ Kirim atau reply gambar dengan perintah .sticker"
+        await googleSearch(text)
       );
 
       return true;
     }
 
-    const sticker =
-      await makeStaticSticker(
-        media
-      );
+    // =================================================
+    // GOOGLE IMAGE
+    // =================================================
 
-    if (!sticker) {
+    if (
+      command === "googleimage"
+    ) {
+      if (!text) {
+        await sendText(
+          chat,
+          `Contoh:\n${PREFIX}googleimage anime`
+        );
+
+        return true;
+      }
+
       await sendText(
         chat,
-        "❌ Gagal membuat sticker."
+        await googleImageSearch(text)
       );
 
       return true;
     }
 
-    try {
+    // =================================================
+    // WIKIPEDIA
+    // =================================================
+
+    if (
+      command === "wikipedia"
+    ) {
+      if (!text) {
+        await sendText(
+          chat,
+          `Contoh:\n${PREFIX}wikipedia Indonesia`
+        );
+
+        return true;
+      }
+
+      await sendText(
+        chat,
+        await wikipediaSearch(text)
+      );
+
+      return true;
+    }
+
+    // =================================================
+    // YOUTUBE
+    // =================================================
+
+    if (
+      command === "ytsearch" ||
+      command === "play"
+    ) {
+      if (!text) {
+        await sendText(
+          chat,
+          `Contoh:\n${PREFIX}${command} lagu`
+        );
+
+        return true;
+      }
+
+      await sendText(
+        chat,
+        await youtubeSearch(text)
+      );
+
+      return true;
+    }
+
+    // =================================================
+    // LIRIK
+    // =================================================
+
+    if (
+      command === "lirik"
+    ) {
+      if (!text) {
+        await sendText(
+          chat,
+          `Contoh:\n${PREFIX}lirik judul lagu`
+        );
+
+        return true;
+      }
+
+      await sendText(
+        chat,
+        await lyricSearch(text)
+      );
+
+      return true;
+    }
+
+    // =================================================
+    // BRAT
+    // =================================================
+
+    if (
+      command === "brat"
+    ) {
+      if (!text) {
+        await sendText(
+          chat,
+          `Contoh:\n${PREFIX}brat zaza baik`
+        );
+
+        return true;
+      }
+
+      await sendText(
+        chat,
+        "⏳ Membuat Brat..."
+      );
+
+      const image =
+        await createBrat(text);
+
+      const sticker =
+        await makeStaticSticker(
+          image
+        );
+
       await sock.sendMessage(
         chat,
         {
-          image: sticker,
-          caption:
-            "⚠️ Sticker converter belum memakai encoder WebP."
+          sticker
+        },
+        {
+          quoted: message
         }
       );
-    } catch {
-      await sendText(
-        chat,
-        "❌ Gagal mengirim media."
-      );
+
+      return true;
     }
 
-    return true;
-  }
+    // =================================================
+    // TTP
+    // =================================================
 
-  // ===================================================
-  // TO IMAGE
-  // ===================================================
+    if (
+      command === "ttp"
+    ) {
+      if (!text) {
+        await sendText(
+          chat,
+          `Contoh:\n${PREFIX}ttp ZazaBot`
+        );
 
-  if (command === "toimg") {
-    await sendText(
-      chat,
-      "⚠️ Fitur .toimg membutuhkan converter WebP ke PNG."
-    );
+        return true;
+      }
 
-    return true;
-  }
+      const sticker =
+        await textSticker(
+          text
+        );
 
-  // ===================================================
-  // BRAT
-  // ===================================================
-
-  if (command === "brat") {
-    if (!text) {
-      await sendText(
+      await sock.sendMessage(
         chat,
-        `Contoh:\n${PREFIX}brat Zaza Store`
+        {
+          sticker
+        },
+        {
+          quoted: message
+        }
       );
 
       return true;
     }
 
-    await sendText(
-      chat,
-      `🖼️ Brat text:\n\n${text}\n\n⚠️ Generator Brat belum dikonfigurasi.`
-    );
+    // =================================================
+    // ATTP
+    // =================================================
 
-    return true;
-  }
+    if (
+      command === "attp"
+    ) {
+      if (!text) {
+        await sendText(
+          chat,
+          `Contoh:\n${PREFIX}attp ZazaBot`
+        );
 
-  // ===================================================
-  // TTP
-  // ===================================================
+        return true;
+      }
 
-  if (command === "ttp") {
-    if (!text) {
-      await sendText(
+      const sticker =
+        await textSticker(
+          text
+        );
+
+      await sock.sendMessage(
         chat,
-        `Contoh:\n${PREFIX}ttp ZazaBot`
+        {
+          sticker
+        },
+        {
+          quoted: message
+        }
       );
 
       return true;
     }
 
-    await sendText(
-      chat,
-      `📝 TTP:\n${text}\n\n⚠️ Generator sticker teks belum dikonfigurasi.`
-    );
+    // =================================================
+    // STICKER / S
+    // =================================================
 
-    return true;
-  }
+    if (
+      command === "sticker" ||
+      command === "s"
+    ) {
+      const msg =
+        message.message;
 
-  // ===================================================
-  // ATTP
-  // ===================================================
+      let imageMessage =
+        msg?.imageMessage;
 
-  if (command === "attp") {
-    if (!text) {
-      await sendText(
+      const quoted =
+        msg?.extendedTextMessage
+          ?.contextInfo
+          ?.quotedMessage;
+
+      if (
+        !imageMessage &&
+        quoted?.imageMessage
+      ) {
+        imageMessage =
+          quoted.imageMessage;
+      }
+
+      if (!imageMessage) {
+        await sendText(
+          chat,
+          `⚠️ Kirim gambar dengan caption ${PREFIX}sticker\n\natau reply gambar dengan ${PREFIX}sticker`
+        );
+
+        return true;
+      }
+
+      try {
+        await sendText(
+          chat,
+          "⏳ Membuat sticker..."
+        );
+
+        const buffer =
+          await downloadMedia(
+            imageMessage,
+            "image"
+          );
+
+        const sticker =
+          await makeStaticSticker(
+            buffer
+          );
+
+        await sock.sendMessage(
+          chat,
+          {
+            sticker
+          },
+          {
+            quoted: message
+          }
+        );
+
+      } catch (error) {
+        await sendText(
+          chat,
+          `❌ Sticker gagal.\n\n${error.message}`
+        );
+      }
+
+      return true;
+    }
+
+    // =================================================
+    // TOIMG
+    // =================================================
+
+    if (
+      command === "toimg"
+    ) {
+      const quoted =
+        message.message
+          ?.extendedTextMessage
+          ?.contextInfo
+          ?.quotedMessage;
+
+      if (
+        !quoted?.stickerMessage
+      ) {
+        await sendText(
+          chat,
+          `⚠️ Reply sticker dengan ${PREFIX}toimg`
+        );
+
+        return true;
+      }
+
+      try {
+        const buffer =
+          await downloadMedia(
+            quoted.stickerMessage,
+            "sticker"
+          );
+
+        await sock.sendMessage(
+          chat,
+          {
+            image: buffer,
+            caption:
+              "🖼️ Sticker → Image"
+          },
+          {
+            quoted: message
+          }
+        );
+
+      } catch (error) {
+        await sendText(
+          chat,
+          `❌ Gagal mengubah sticker.\n\n${error.message}`
+        );
+      }
+
+      return true;
+    }
+
+    // =================================================
+    // QR CODE
+    // =================================================
+
+    if (
+      command === "qr" ||
+      command === "qrcode"
+    ) {
+      if (!text) {
+        await sendText(
+          chat,
+          `Contoh:\n${PREFIX}qrcode Zaza Store`
+        );
+
+        return true;
+      }
+
+      await sendQR(
         chat,
-        `Contoh:\n${PREFIX}attp ZazaBot`
+        text
       );
 
       return true;
     }
 
-    await sendText(
-      chat,
-      `📝 ATTP:\n${text}\n\n⚠️ Generator animasi teks belum dikonfigurasi.`
-    );
+    // =================================================
+    // SHORTLINK
+    // =================================================
 
-    return true;
-  }
+    if (
+      command === "shortlink"
+    ) {
+      const url =
+        extractUrl(text);
 
-  // ===================================================
-  // QR
-  // ===================================================
+      if (!url) {
+        await sendText(
+          chat,
+          `Contoh:\n${PREFIX}shortlink https://google.com`
+        );
 
-  if (command === "qr") {
-    if (!text) {
+        return true;
+      }
+
+      const result =
+        await tinyUrl(url);
+
       await sendText(
         chat,
-        `Contoh:\n${PREFIX}qr https://google.com`
+        `🔗 *SHORTLINK*\n\n${result}`
       );
 
       return true;
     }
 
-    await sendQR(
-      chat,
-      text
-    );
+    // =================================================
+    // TIKTOK
+    // =================================================
 
-    return true;
-  }
+    if (
+      command === "tiktok" ||
+      command === "tiktoknowm" ||
+      command === "tiktokwm"
+    ) {
+      const url =
+        extractUrl(text);
 
-  // ===================================================
-  // SHORTLINK
-  // ===================================================
+      if (!url) {
+        await sendText(
+          chat,
+          `Contoh:\n${PREFIX}tiktoknowm https://vt.tiktok.com/xxxxx`
+        );
 
-  if (command === "shortlink") {
-    const url =
-      extractUrl(text);
+        return true;
+      }
 
-    if (!url) {
+      if (
+        !url.includes("tiktok.com")
+      ) {
+        await sendText(
+          chat,
+          "❌ Link tersebut bukan link TikTok."
+        );
+
+        return true;
+      }
+
       await sendText(
         chat,
-        `Contoh:\n${PREFIX}shortlink https://google.com`
+        "⏳ Mengunduh TikTok..."
+      );
+
+      const result =
+        await downloadTikTok(
+          url
+        );
+
+      await sock.sendMessage(
+        chat,
+        {
+          video: {
+            url: result.video
+          },
+          caption:
+            "🎵 *TIKTOK DOWNLOADER*\n\n" +
+            "✅ Download berhasil"
+        },
+        {
+          quoted: message
+        }
       );
 
       return true;
     }
 
-    const result =
-      await tinyUrl(url);
+    // =================================================
+    // TIKTOK MUSIC
+    // =================================================
 
-    await sendText(
-      chat,
-      `🔗 Shortlink:\n${result}`
-    );
+    if (
+      command === "tiktokmusic"
+    ) {
+      const url =
+        extractUrl(text);
 
-    return true;
-  }
+      if (!url) {
+        await sendText(
+          chat,
+          `Contoh:\n${PREFIX}tiktokmusic https://vt.tiktok.com/xxxxx`
+        );
 
-  // ===================================================
-  // SCREENSHOT
-  // ===================================================
+        return true;
+      }
 
-  if (command === "ss") {
-    if (!text) {
       await sendText(
         chat,
-        `Contoh:\n${PREFIX}ss https://google.com`
+        "⏳ Mengambil audio..."
+      );
+
+      const result =
+        await downloadTikTok(
+          url
+        );
+
+      if (!result.audio) {
+        await sendText(
+          chat,
+          "❌ Audio tidak tersedia dari downloader."
+        );
+
+        return true;
+      }
+
+      await sock.sendMessage(
+        chat,
+        {
+          audio: {
+            url: result.audio
+          },
+          mimetype:
+            "audio/mpeg"
+        },
+        {
+          quoted: message
+        }
       );
 
       return true;
     }
 
+    // =================================================
+    // TRANSLATE
+    // =================================================
+
+    if (
+      command === "translate"
+    ) {
+      if (!text) {
+        await sendText(
+          chat,
+          `Contoh:\n${PREFIX}translate en halo dunia`
+        );
+
+        return true;
+      }
+
+      const parts =
+        text.split(/\s+/);
+
+      let lang =
+        parts[0] || "id";
+
+      let source =
+        parts.slice(1).join(" ");
+
+      if (!source) {
+        lang = "id";
+        source = text;
+      }
+
+      try {
+        const api =
+          "https://api.mymemory.translated.net/get?q=" +
+          encodeURIComponent(source) +
+          "&langpair=id|" +
+          encodeURIComponent(lang);
+
+        const response =
+          await fetch(api);
+
+        const data =
+          await response.json();
+
+        const result =
+          data?.responseData?.translatedText;
+
+        if (!result) {
+          throw new Error(
+            "Hasil terjemahan kosong."
+          );
+        }
+
+        await sendText(
+          chat,
+          `🌐 *TRANSLATE*\n\n` +
+          `🇮🇩 ${source}\n\n` +
+          `➡️ ${result}`
+        );
+
+      } catch (error) {
+        await sendText(
+          chat,
+          `❌ Translate gagal.\n${error.message}`
+        );
+      }
+
+      return true;
+    }
+
+    // =================================================
+    // SCREENSHOT
+    // =================================================
+
+    if (
+      command === "screenshot" ||
+      command === "ss"
+    ) {
+      const url =
+        extractUrl(text);
+
+      if (!url) {
+        await sendText(
+          chat,
+          `Contoh:\n${PREFIX}screenshot https://google.com`
+        );
+
+        return true;
+      }
+
+      const api =
+        "https://image.thum.io/get/fullpage/" +
+        encodeURIComponent(url);
+
+      await sock.sendMessage(
+        chat,
+        {
+          image: {
+            url: api
+          },
+          caption:
+            `📸 Screenshot\n${url}`
+        },
+        {
+          quoted: message
+        }
+      );
+
+      return true;
+    }
+
+    // =================================================
+    // REMOVE BACKGROUND
+    // =================================================
+
+    if (
+      command === "removebackground" ||
+      command === "removebg"
+    ) {
+      await sendText(
+        chat,
+        "⚠️ Remove Background membutuhkan API khusus. Fitur ini belum diaktifkan agar bot tidak mengirim hasil palsu."
+      );
+
+      return true;
+    }
+
+    // =================================================
+    // OCR
+    // =================================================
+
+    if (
+      command === "ocr"
+    ) {
+      await sendText(
+        chat,
+        "⚠️ OCR membutuhkan API OCR. Fitur ini belum diaktifkan."
+      );
+
+      return true;
+    }
+
+    // =================================================
+    // COMMAND LAIN YANG BELUM ADA API
+    // =================================================
+
+    const unavailable = [
+      "facebook",
+      "igdl",
+      "igreel",
+      "igtv",
+      "igstory",
+      "pindl",
+      "threads",
+      "twitterdl",
+      "douyin",
+      "mediafire",
+      "spotify",
+      "ytmp3",
+      "ytmp4",
+      "otakudesudl",
+      "tourl",
+      "tomp3",
+      "tovn",
+      "upscale",
+      "tts",
+      "qrcodereader"
+    ];
+
+    if (
+      unavailable.includes(
+        command
+      )
+    ) {
+      await sendText(
+        chat,
+        `⚠️ *${command}* membutuhkan API/provider khusus dan belum dikonfigurasi.`
+      );
+
+      return true;
+    }
+
+    return false;
+
+  } catch (error) {
+    console.error(
+      "PART 4 ERROR:",
+      error
+    );
+
     await sendText(
       chat,
-      `📸 Screenshot URL:\n${text}\n\n⚠️ Screenshot API belum dikonfigurasi.`
+      `❌ Terjadi error pada fitur.\n\n${error.message}`
     );
 
     return true;
   }
-
-  // ===================================================
-  // TOURl
-  // ===================================================
-
-  if (command === "tourl") {
-    await sendText(
-      chat,
-      "⚠️ Upload-to-URL belum dikonfigurasi."
-    );
-
-    return true;
-  }
-
-  // ===================================================
-  // REMOVE BG
-  // ===================================================
-
-  if (command === "removebg") {
-    await sendText(
-      chat,
-      "⚠️ Remove Background API belum dikonfigurasi."
-    );
-
-    return true;
-  }
-
-  // ===================================================
-  // OCR
-  // ===================================================
-
-  if (command === "ocr") {
-    await sendText(
-      chat,
-      "⚠️ OCR belum dikonfigurasi."
-    );
-
-    return true;
-  }
-
-  return false;
 }
 
-// =====================================================
-// PART 4 LOADED
-// =====================================================
-
 console.log(
-  `${BOT_NAME} PART 4 loaded successfully.`
+  "ZazaBot PART 4 loaded successfully."
+);
 );
 // =====================================================
 // ZAZABOT - PART 5
